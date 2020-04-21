@@ -48,7 +48,7 @@ counts<-counts[,c(1:96)] %>% select(-c(1,3,5,which(grepl("SUM",names(counts))),w
 head(counts)
 dim(counts)
 summary(counts$Number)
-
+table(counts$Observer)
 
 
 #####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
