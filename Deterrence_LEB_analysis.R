@@ -10,8 +10,6 @@ library(tidyverse)
 library(stringr)
 library(lubridate)
 library(readxl)
-library(lme4)
-library(glmmTMB)
 library(randomForest)
 filter<-dplyr::filter
 select<-dplyr::select
@@ -26,7 +24,7 @@ select<-dplyr::select
 
 
 #setwd("A:\\RSPB\\Marine\\Bycatch\\GillnetBycatch")
-setwd("C:\\STEFFEN\\RSPB\\Marine\\Bycatch\\GillnetBycatch\\RawData")
+setwd("C:\\STEFFEN\\RSPB\\Marine\\Bycatch\\GillnetBycatch\\Analysis\\LoomingEye")
 
 # Read the data from formatted CSV files (one for each mitigation trial)
 surveys <- read_excel("Estonia_Seabird_Bycatch_Project_FINAL_DATA_YR.xlsx", sheet="Estonia_Seabird_Bycatch_Pro_0")
@@ -67,7 +65,6 @@ ggplot() + geom_histogram(aes(x=N)) + facet_wrap(Phase~Treatment)
 #####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
 #####     PLOT SIMPLE COMPARISONS WITH ERROR BARS  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
 #####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
-
 
 SUMMARY<-counts %>% filter(!is.na(Number)) %>% #filter(Number<25) %>%
   group_by(Phase,Treatment,GlobalID) %>%
@@ -159,7 +156,7 @@ counts %>% filter(!is.na(Number)) %>%
         panel.grid.major = element_blank(), 
         panel.grid.minor = element_blank(), 
         panel.border = element_blank())
-ggsave("LEB_raw_data_LTDU.jpg", width=8, height=8)
+#ggsave("LEB_raw_data_LTDU.jpg", width=8, height=8)
 #ggsave("LEB_raw_data_allbirds_without_LTDU.jpg", width=8, height=8)
 
 
@@ -194,10 +191,6 @@ which(is.na(data)==T) ### no missing values
 head(data)
 RF<- randomForest(N~Phase+Treatment+day+hour+weather+wind_dir+Temp+wind_speed+cloud+sea+vis+Observer, data=data, mtry=5,ntree=500, importance=T)
 RF
-varImpPlot(RF)
-partialPlot(RF,pred.datax.var="Treatment")
-
-
 
 
 
@@ -271,11 +264,36 @@ ggsave("LBE_LTDU_variable_importance.jpg", width=8, height=9)
 #partialPlot(RF, data, x.var=Treatment) ## does not work for character variables
 
 
+## how to create your own partial Plot with 'party': http://stats.stackexchange.com/questions/83534/what-is-the-purpose-of-working-on-a-logit-scale-in-partial-dependence-plots?rq=1
 
+table(data$Observer)
 
+plotdat<-bind_rows(data,data) %>%
+  mutate(Treatment=rep(unique(data$Treatment), each=dim(data)[1])) %>%
+  filter(Observer=="Ainar,Mati") ## curtail to only one observer to plot effect irrespective of observer variation
 
+plotdat %>%
+  mutate(pred.num=predict(RF, newdat=plotdat)) %>%
+  group_by(Treatment) %>%
+  #summarise(mean=mean(pred.num), lcl=quantile(pred.num,0.25),ucl=quantile(pred.num,0.75)) %>%
+  summarise(mean=mean(pred.num), lcl=mean(pred.num)-0.5*sd(pred.num),ucl=mean(pred.num)+0.5*sd(pred.num)) %>%
 
+  ggplot(aes(y=mean, x=Treatment)) + geom_point(size=2, colour="firebrick")+
+  geom_errorbar(aes(ymin=lcl, ymax=ucl), width=.03)+
+  scale_y_continuous(limits=c(0,8)) +
+  xlab("") +
+  ylab("Predicted number of LTDU") +
+  theme(panel.background=element_rect(fill="white", colour="black"), 
+        axis.text=element_text(size=16, color="black"), 
+        axis.title=element_text(size=18), 
+        strip.text=element_text(size=18, color="black"),
+        legend.text=element_text(size=14, color="black"),
+        legend.title=element_text(size=18, color="black"),
+        legend.key=element_blank(),
+        strip.background=element_rect(fill="white", colour="black"), 
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.border = element_blank())
 
-
-
-
+#ggsave("LEB_Treatment_effect_OtherObservers.jpg", width=8, height=8)
+ggsave("LEB_Treatment_effect_AinarMati.jpg", width=8, height=8)
