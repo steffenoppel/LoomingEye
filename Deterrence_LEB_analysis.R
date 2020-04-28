@@ -78,14 +78,14 @@ ggplot() + geom_histogram(aes(x=N)) + facet_wrap(Phase~Treatment)
 #####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
 
 SUMMARY<-counts %>% filter(!is.na(Number)) %>% #filter(Number<25) %>%
-  filter(Observer != "Maris") %>%
-  filter(Species=="Long-tailed Duck") %>%
-  group_by(Phase,Treatment,GlobalID) %>%
+  #filter(Observer != "Maris") %>%
+  #filter(Species=="Long-tailed Duck") %>%
+  group_by(Phase,Treatment, GlobalID) %>%
   summarise(N=sum(Number)) %>%
   ungroup() %>%
   group_by(Phase,Treatment) %>%
   summarise(mean=mean(N), lcl=quantile(N,0.025),ucl=quantile(N,0.975))  
-
+#fwrite(SUMMARY,"LEB_raw_data_summary.csv")
 
 SUMMARY %>% #filter(Phase!="PrePhase1") %>%
 
@@ -191,7 +191,6 @@ data<- counts %>% filter(!is.na(Number)) %>%
   #filter(Observer != "Maris") %>%
   mutate(Observer=ifelse(Observer=="Ainar,Mati","Mati,Ainar",Observer)) %>%
   mutate(Observer=ifelse(Observer=="Ainar,Andrus,Rein,Veljo,Mati,Andres,OtherObservers","OtherObservers",Observer)) %>%
-  mutate(Observer=ifelse(Observer=="Andrus","Andres",Observer)) %>%
   mutate(Observer=ifelse(Observer=="Veljo,OtherObservers","Veljo",Observer)) %>%
   group_by(Phase,Treatment,CountSeq,PeriodCode,Observer,weather,wind_dir,Temp,wind_speed,cloud,sea,vis,Start) %>%
   summarise(N=sum(Number)) %>%
@@ -375,12 +374,13 @@ library(glmmTMB)
 head(data)
 
 BACIdata <- data %>% mutate(Before=ifelse(Phase=="PrePhase1","before","after")) %>%
-  mutate(PhaseNum=ifelse(Phase %in% c("Phase2","PostPhase2"),2,1))
+  mutate(PhaseNum=ifelse(Phase %in% c("Phase2","PostPhase2"),2,1)) %>%
+  mutate(Memory=ifelse(Phase %in% c("PostPhase1","PostPhase2"),1,0))
   
 
 ## fit models
-m1<-glmmTMB(N~Before+Treatment+Before*Treatment+day+hour+Observer+(1|PhaseNum), data=BACIdata, ziformula=~1,family=nbinom2)
-m0<-glmmTMB(N~Before+Treatment+day+hour+Observer+(1|PhaseNum), data=BACIdata, ziformula=~1,family=nbinom2)
+m1<-glmmTMB(N~Before+Treatment+Before*Treatment+PhaseNum*Treatment+Memory*Treatment +day+hour+Observer+(1|PhaseNum), data=BACIdata, ziformula=~1,family=nbinom2)
+m0<-glmmTMB(N~Before+Treatment+PhaseNum*Treatment+Memory*Treatment+day+hour+Observer+(1|PhaseNum), data=BACIdata, ziformula=~1,family=nbinom2)
 
 
 ## assess significance of interaction effect
@@ -395,7 +395,8 @@ plotdat<-bind_rows(replicate(10,data, simplify=F)) %>%
   mutate(Treatment=rep(rep(unique(data$Treatment), each=dim(data)[1]),5)) %>%
   mutate(Phase=rep(rep(unique(data$Phase), each=dim(data)[1]), each=2)) %>%
   mutate(Before=ifelse(Phase=="PrePhase1","before","after")) %>%
-  mutate(PhaseNum=ifelse(Phase %in% c("Phase2","PostPhase2"),2,1)) #%>%
+  mutate(PhaseNum=ifelse(Phase %in% c("Phase2","PostPhase2"),2,1)) %>%
+  mutate(Memory=ifelse(Phase %in% c("PostPhase1","PostPhase2"),1,0)) #%>%
   #filter(Observer=="Mati,Ainar")
 
 plotdat %>%
@@ -405,7 +406,7 @@ plotdat %>%
   
   ggplot(aes(y=mean, x=Treatment)) + geom_point(size=2, colour="firebrick")+
   geom_errorbar(aes(ymin=lcl, ymax=ucl), width=.03)+
-  scale_y_continuous(limits=c(0,3)) +
+  scale_y_continuous(limits=c(0,2.5)) +
   facet_wrap(~Phase, ncol=2) +
   xlab("") +
   ylab("Predicted number of LTDU") +
@@ -421,4 +422,17 @@ plotdat %>%
         panel.grid.minor = element_blank(), 
         panel.border = element_blank())
 
-ggsave("LEB_Treatment_effect_byPhase_BACI_withMaris.jpg", width=8, height=11)
+ggsave("LEB_Treatment_effect_byPhase_BACI.jpg", width=8, height=11)
+
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+##### 6. CALCULATE EFFECT SIZE ######
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+effsize<-plotdat %>%
+  mutate(pred.num=predict(m1, newdat=plotdat)) %>%
+  group_by(Phase,Treatment) %>%
+  summarise(mean=mean(pred.num)) %>%
+  spread(key=Treatment, value=mean) %>%
+  mutate(reduction=((Control-Treatment)/Control)*100)
+fwrite(effsize,"LEB_BACI_effect_size_perPhase.csv")

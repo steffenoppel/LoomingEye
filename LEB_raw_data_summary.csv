@@ -1,0 +1,11 @@
+Phase,Treatment,Total_N_all_species
+Phase1,Control,2746
+Phase1,Treatment,1282
+Phase2,Control,1698
+Phase2,Treatment,2228
+PostPhase1,Control,1276
+PostPhase1,Treatment,725
+PostPhase2,Control,215
+PostPhase2,Treatment,24
+PrePhase1,Control,279
+PrePhase1,Treatment,602
