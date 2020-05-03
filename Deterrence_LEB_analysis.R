@@ -8,6 +8,8 @@
 ## temporarily removed counts from Maris as they seem to be completely opposite to anyone else - but then reinserted
 ## updated on 3 May 2020: included sections for other species
 
+## NEED TO DO: remove counts>20 as outliers for all non-LTDU analyses
+
 ### Load libraries
 library(ggplot2)
 library(data.table)
