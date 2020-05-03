@@ -275,7 +275,7 @@ ggplot(IMP, aes(x=variable, y=rel_imp)) +
         panel.grid.major = element_blank(), 
         panel.grid.minor = element_blank(), 
         panel.border = element_blank())
-ggsave("LBE_LTDU_variable_importance.jpg", width=8, height=9)
+ggsave("LBE_seabirds_variable_importance.jpg", width=8, height=9)
 
 
 
@@ -440,6 +440,91 @@ fwrite(effsize,"LEB_BACI_effect_size_perPhase.csv")
 
 
 
+
+
+
+#####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
+#####     FORMAL ANALYSIS FOR ALL SEABIRDS EXCEPT LTDU      ~~~~~~~~~~~########
+#####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
+unique(counts$Species)
+
+### SELECT ONLY THE RECORDS RELEVANT TO THE TEST
+data<- counts %>% filter(!is.na(Number)) %>% 
+  filter(Species!= "Long-tailed Duck") %>%   ##"everything except LTDU
+  mutate(Observer=ifelse(Observer=="Ainar,Mati","Mati,Ainar",Observer)) %>%
+  mutate(Observer=ifelse(Observer=="Ainar,Andrus,Rein,Veljo,Mati,Andres,OtherObservers","OtherObservers",Observer)) %>%
+  mutate(Observer=ifelse(Observer=="Veljo,OtherObservers","Veljo",Observer)) %>%
+  group_by(Phase,Treatment,CountSeq,PeriodCode,Observer,weather,wind_dir,Temp,wind_speed,cloud,sea,vis,Start) %>%
+  summarise(N=sum(Number)) %>%
+  mutate(day=yday(Start)) %>%
+  mutate(hour=hour(Start)) %>%
+  ungroup() %>%
+  mutate_if(is.character, as.factor)
+
+hist(data$N)
+dim(data)
+table(data$Observer)
+
+
+
+##### CONDUCT PARAMETRIC BACI ANALYSIS ######
+
+BACIdata <- data %>% mutate(Before=ifelse(Phase=="PrePhase1","before","after")) %>%
+  mutate(PhaseNum=ifelse(Phase %in% c("Phase2","PostPhase2"),2,1)) %>%
+  mutate(Memory=ifelse(Phase %in% c("PostPhase1","PostPhase2"),1,0))
+
+## fit models - tried all options to include more interactions and variables, but convergence problems if we add more
+m1<-glmmTMB(N~Before+Treatment+Before*Treatment+Memory*Treatment +day+hour +(1|PhaseNum), data=BACIdata, ziformula=~1,family=nbinom2)
+m0<-glmmTMB(N~Before+Treatment+Memory*Treatment +day+hour +(1|PhaseNum), data=BACIdata, ziformula=~1,family=nbinom2)
+
+## assess significance of interaction effect
+anova(m0,m1)
+m1sum<-summary(m1)
+
+
+### PLOT predicted OUTPUT ###
+
+plotdat<-bind_rows(replicate(10,data, simplify=F)) %>%
+  mutate(Treatment=rep(rep(unique(data$Treatment), each=dim(data)[1]),5)) %>%
+  mutate(Phase=rep(rep(unique(data$Phase), each=dim(data)[1]), each=2)) %>%
+  mutate(Before=ifelse(Phase=="PrePhase1","before","after")) %>%
+  mutate(PhaseNum=ifelse(Phase %in% c("Phase2","PostPhase2"),2,1)) %>%
+  mutate(Memory=ifelse(Phase %in% c("PostPhase1","PostPhase2"),1,0)) #%>%
+
+
+#### CALCULATE EFFECT SIZE ######
+effsize<-plotdat %>%
+  mutate(pred.num=predict(m1, newdat=plotdat)) %>%
+  group_by(Phase,Treatment) %>%
+  summarise(mean=mean(pred.num)) %>%
+  spread(key=Treatment, value=mean) %>%
+  mutate(reduction=((Control-Treatment)/Control)*100)
+#fwrite(effsize,"LEB_BACI_effect_size_perPhase_seabirds.csv")
+
+plotdat %>%
+  mutate(pred.num=predict(m1, newdat=plotdat)) %>%
+  group_by(Phase,Treatment) %>%
+  summarise(mean=mean(pred.num), lcl=mean(pred.num)-0.5*sd(pred.num),ucl=mean(pred.num)+0.5*sd(pred.num)) %>%
+  
+  ggplot(aes(y=mean, x=Treatment)) + geom_point(size=2, colour="firebrick")+
+  geom_errorbar(aes(ymin=lcl, ymax=ucl), width=.03)+
+  #scale_y_continuous(limits=c(0,2.5)) +
+  facet_wrap(~Phase, ncol=2) +
+  xlab("") +
+  ylab("Predicted number of seabirds other than LTDU") +
+  theme(panel.background=element_rect(fill="white", colour="black"), 
+        axis.text=element_text(size=16, color="black"), 
+        axis.title=element_text(size=18), 
+        strip.text=element_text(size=18, color="black"),
+        legend.text=element_text(size=14, color="black"),
+        legend.title=element_text(size=18, color="black"),
+        legend.key=element_blank(),
+        strip.background=element_rect(fill="white", colour="black"), 
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.border = element_blank())
+
+#ggsave("LEB_Treatment_effect_byPhase_BACI_seabirds.jpg", width=8, height=11)
 
 
 
