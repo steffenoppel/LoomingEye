@@ -53,7 +53,7 @@ surveys<-surveys[,c(2,3,8:19)] %>%
 
 dim(surveys)
 
-counts<-counts[,c(1:96)] %>% select(-c(1,3,5,which(grepl("SUM",names(counts))),which(grepl("Additional",names(counts))))) %>%  ## THIS ELIMINATES 40 birds across all phases that are lumped in 'additional 1 species'
+counts<-counts[,c(1:103)] %>% select(-c(1,3,5,which(grepl("SUM",names(counts))),which(grepl("Additional",names(counts))))) %>%  ## THIS ELIMINATES 40 birds across all phases that are lumped in 'additional 1 species'
   rename(Time=`Count Time:`, CountSeq=`Count Number:`) %>%
   gather(key=spec,value=Number,-GlobalID,-Phase,-Time,-CountSeq) %>%
   separate(spec,into=c("Treatment","Species"),sep="_") %>%
