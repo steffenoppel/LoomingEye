@@ -64,6 +64,7 @@ dim(counts)
 dim(counts %>% filter(Observer != "Maris"))
 summary(counts$Number)
 table(counts$Observer)
+range(dmy(surveys$Date))
 
 
 #####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
@@ -385,11 +386,9 @@ BACIdata <- data %>% mutate(Before=ifelse(Phase=="PrePhase1","before","after")) 
 m1<-glmmTMB(N~Before+Treatment+Before*Treatment+PhaseNum*Treatment+Memory*Treatment +day+hour+Observer+(1|PhaseNum), data=BACIdata, ziformula=~1,family=nbinom2)
 m0<-glmmTMB(N~Before+Treatment+PhaseNum*Treatment+Memory*Treatment+day+hour+Observer+(1|PhaseNum), data=BACIdata, ziformula=~1,family=nbinom2)
 
-
 ## assess significance of interaction effect
 anova(m0,m1)
 m1sum<-summary(m1)
-
 
 
 ### PLOT predicted OUTPUT ###
@@ -429,6 +428,8 @@ ggsave("LEB_Treatment_effect_byPhase_BACI.jpg", width=8, height=11)
 
 
 
+
+
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
 ##### 6. CALCULATE EFFECT SIZE ######
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
@@ -439,6 +440,143 @@ effsize<-plotdat %>%
   spread(key=Treatment, value=mean) %>%
   mutate(reduction=((Control-Treatment)/Control)*100)
 fwrite(effsize,"LEB_BACI_effect_size_perPhase.csv")
+
+
+
+
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+##### 7. ASSESS MEMORY EFFECT ######
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+## assess memory effect - is there habituation or memory effect?
+### Hypothesis is that deterrence effect diminishes over time, i.e. pre- and post-phase should be similar
+### only done for Phase 1 when we have pre- and post-phase observations
+## requested by Yann Rouxel on 10 Aug 2020
+
+## exclude pre-phase 1 data and call presence of LEB 'before' and post-phase 'after' to check for difference and direction of effect
+
+MEMOdata <- data %>% filter(!Phase=="PrePhase1") %>%
+  mutate(Before=ifelse(Phase %in% c("Phase2","Phase1"),"before","after")) %>%
+  mutate(PhaseNum=ifelse(Phase %in% c("Phase2","PostPhase2"),2,1))
+
+
+m1mem<-glmmTMB(N~Before+Treatment+Before*Treatment+PhaseNum*Before+day+Observer+(1|PhaseNum), data=MEMOdata, ziformula=~1,family=nbinom2)
+m0mem<-glmmTMB(N~Before+Treatment+PhaseNum*Before+day+Observer+(1|PhaseNum), data=MEMOdata, ziformula=~1,family=nbinom2)
+anova(m0mem,m1mem)
+m1sum.memory<-summary(m1mem)
+
+### PLOT predicted OUTPUT ###
+
+plotdat<-bind_rows(replicate(36,data, simplify=F)) %>%
+  mutate(Observer=rep(rep(unique(MEMOdata$Observer), each=dim(data)[1]),6)) %>% ### causes strange 'subscript out of bounds' error in predict
+  mutate(hour=rep(rep(c(6,8,10,12,14,16), dim(data)[1]),each=6)) %>% 
+  filter(!Phase=="PrePhase1") %>%
+  mutate(Before=ifelse(Phase %in% c("Phase2","Phase1"),"before","after")) %>%
+  mutate(PhaseNum=ifelse(Phase %in% c("Phase2","PostPhase2"),2,1))
+
+
+plotdat %>%
+  mutate(pred.num=predict(m1mem, newdat=plotdat)) %>%
+  mutate(Before=ifelse(Before=="before","during LEB","post LEB")) %>%
+  mutate(PhaseNum=paste("Phase",PhaseNum, sep=" ")) %>%
+  group_by(PhaseNum,Treatment,Before) %>%
+  summarise(mean=mean(pred.num), lcl=mean(pred.num)-0.5*sd(pred.num),ucl=mean(pred.num)+0.5*sd(pred.num)) %>%
+  
+  ggplot(aes(y=mean, x=Before)) + geom_point(size=2, colour="firebrick")+
+  geom_errorbar(aes(ymin=lcl, ymax=ucl), width=.03)+
+  scale_y_continuous(limits=c(-1,4)) +
+  facet_grid(PhaseNum~Treatment) +
+  xlab("") +
+  ylab("Predicted number of LTDU") +
+  theme(panel.background=element_rect(fill="white", colour="black"), 
+        axis.text=element_text(size=16, color="black"), 
+        axis.title=element_text(size=18), 
+        strip.text=element_text(size=18, color="black"),
+        legend.text=element_text(size=14, color="black"),
+        legend.title=element_text(size=18, color="black"),
+        legend.key=element_blank(),
+        strip.background=element_rect(fill="white", colour="black"), 
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.border = element_blank())
+
+ggsave("LEB_Memory_effect_byPhase_BACI.jpg", width=8, height=11)
+
+### Quantify effect size
+
+effsizeMEM<-plotdat %>%
+  mutate(pred.num=predict(m1mem, newdat=plotdat)) %>%
+  group_by(PhaseNum,Treatment,Before) %>%
+  summarise(mean=mean(pred.num)) %>%
+  spread(key=Before, value=mean) %>%
+  mutate(reduction=((before-after)/before)*100)
+fwrite(effsizeMEM,"LEB_BACI_MEMORY_effect_size_perPhase.csv")
+
+
+
+
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+##### 8. ASSESS HABITUATION ######
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+## assess habituation effect
+### Hypothesis is that deterrence effect diminishes over time
+### only done for deployment phases
+## requested by Yann Rouxel on 10 Aug 2020
+
+## exclude pre- and post-phase data
+PhaseStart<-data %>% group_by(Phase) %>% summarise(start=min(day))
+
+HABIdata <- data %>% filter(!Phase %in% c("PrePhase1","PostPhase1","PostPhase2")) %>%
+  mutate(PhaseNum=ifelse(Phase %in% c("Phase2","PostPhase2"),2,1)) %>%
+  left_join(PhaseStart, by="Phase") %>%
+  mutate(DAY=day-start)
+unique(HABIdata$Observer)
+
+m1hab<-glmmTMB(N~Treatment+DAY+DAY*Treatment+PhaseNum*DAY+hour+Observer+(1|PhaseNum), data=HABIdata, ziformula=~1,family=nbinom2)
+m0hab<-glmmTMB(N~Treatment+DAY+PhaseNum*DAY+hour+Observer+(1|PhaseNum), data=HABIdata, ziformula=~1,family=nbinom2)
+anova(m0hab,m1hab)
+m1sum.habituation<-summary(m1hab)
+
+
+### PLOT predicted OUTPUT ###
+plotdat<-bind_rows(replicate(36,data, simplify=F)) %>%
+  mutate(Observer=rep(rep(unique(HABIdata$Observer), each=dim(data)[1]),6)) %>% ### causes strange 'subscript out of bounds' error in predict
+  mutate(hour=rep(rep(c(6,8,10,12,14,16), dim(data)[1]),each=6)) %>% 
+  filter(!Phase %in% c("PrePhase1","PostPhase1","PostPhase2")) %>%
+  mutate(PhaseNum=ifelse(Phase %in% c("Phase2","PostPhase2"),2,1)) %>%
+  left_join(PhaseStart, by="Phase") %>%
+  mutate(DAY=day-start)
+
+#plotdat<-expand.grid(Observer=unique(data$Observer),hour=as.integer(seq(6,18,1)),Treatment=unique(data$Treatment), DAY=as.numeric(seq(0:25)),PhaseNum=c(1,2))
+#dim(plotdat)
+plotdat  %>%
+  mutate(pred.num=predict(m1hab, newdat=plotdat)) %>%
+  mutate(PhaseNum=paste("Phase",PhaseNum, sep=" ")) %>%
+  group_by(PhaseNum,Treatment,DAY) %>%
+  summarise(mean=mean(pred.num), lcl=mean(pred.num)-0.5*sd(pred.num),ucl=mean(pred.num)+0.5*sd(pred.num)) %>%
+  
+  ggplot(aes(y=mean, x=DAY)) + geom_line(size=1, colour="firebrick")+
+  geom_ribbon(aes(x=DAY, ymin=lcl,ymax=ucl),alpha=0.2)+
+  scale_y_continuous(limits=c(0,2.5)) +
+  facet_grid(PhaseNum~Treatment) +
+  xlab("") +
+  ylab("Predicted number of LTDU") +
+  theme(panel.background=element_rect(fill="white", colour="black"), 
+        axis.text=element_text(size=16, color="black"), 
+        axis.title=element_text(size=18), 
+        strip.text=element_text(size=18, color="black"),
+        legend.text=element_text(size=14, color="black"),
+        legend.title=element_text(size=18, color="black"),
+        legend.key=element_blank(),
+        strip.background=element_rect(fill="white", colour="black"), 
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.border = element_blank())
+
+ggsave("LEB_Habituation_effect_byPhase.jpg", width=8, height=11)
 
 
 
@@ -703,5 +841,22 @@ plotdat %>%
         panel.border = element_blank())
 
 #ggsave("LEB_Treatment_effect_byPhase_BACI_mergansers.jpg", width=8, height=11)
+
+
+
+
+
+
+
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+##### CONDUCT PARAMETRIC BACI ANALYSIS FOR LTDU HABITUATION IN PHASE 1 ######
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+### Hypothesis is that deterrence effect diminishes over time, i.e. pre- and post-phase should be similar
+### only done for Phase 1 when we have pre- and post-phase observations
+## requested by Yann Rouxel on 10 Aug 2020
+
+
 
 
