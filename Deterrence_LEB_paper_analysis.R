@@ -287,6 +287,43 @@ plotdat %>%
 ggsave("Fig3_predicted_abundance.jpg", width=8, height=11)
 
 
+########## ALTERNATIVE AND LESS CONFUSING FIGURE FOR MANUSCRIPT  ########
+
+plotdat %>%
+  mutate(pred.num=predict(m1, newdat=plotdat)) %>%
+  mutate(Phase=ifelse(Phase=="PrePhase1", "Before","After")) %>%
+  group_by(Phase,Treatment) %>%
+  summarise(mean=mean(pred.num), lcl=mean(pred.num)-0.5*sd(pred.num),ucl=mean(pred.num)+0.5*sd(pred.num)) %>%
+  ungroup() %>%
+  transform(Phase=factor(Phase,levels=c("Before","After"))) %>% 
+  
+
+  ggplot(aes(y=mean, x=Treatment)) + geom_point(size=2, colour="firebrick")+
+  geom_errorbar(aes(ymin=lcl, ymax=ucl), width=.03)+
+  scale_y_continuous(limits=c(0,2.5)) +
+  #facet_wrap(~Phase, ncol=1, dir="h",as.table=F) +
+  facet_wrap(~Phase, ncol=1) +
+  xlab("") +
+  ylab("Predicted number of Long-tailed Ducks") +
+  theme(panel.background=element_rect(fill="white", colour="black"), 
+        axis.text=element_text(size=16, color="black"), 
+        axis.title=element_text(size=18), 
+        strip.text=element_text(size=18, color="black"),
+        legend.text=element_text(size=14, color="black"),
+        legend.title=element_text(size=18, color="black"),
+        legend.key=element_blank(),
+        strip.background=element_rect(fill="white", colour="black"), 
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.border = element_blank())
+
+ggsave("Fig4_BACI_plot.jpg", width=8, height=11)
+
+
+
+
+
+
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
