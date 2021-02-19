@@ -61,16 +61,27 @@ str(sets)
 setwd("C:\\STEFFEN\\RSPB\\Marine\\Bycatch\\GillnetBycatch\\Analysis\\LoomingEye")
 controls<- sets %>% filter(Fishtrap_with_buoy=="no")
 LEBs<- sets %>% filter(Fishtrap_with_buoy=="yes")
+table(sets$BPUE)
+table(sets$Cormorant)
+range(LEBs$Depl_Date)
+range(LEBs$BPUE)
+range(controls$BPUE)
 
 ## bootstrap test
 boot.samples <- matrix(sample(controls$BPUE, size = 10000 * nrow(controls), replace = TRUE),10000, nrow(controls))
 boot.statistics <- apply(boot.samples, 1, mean)
 RATE_control<-data.frame(treatment="no LEB",mean=mean(boot.statistics),
                   lcl=quantile(boot.statistics,0.025),ucl=quantile(boot.statistics,0.975))
-boot.samples <- matrix(sample(LEBs$BPUE, size = 10000 * nrow(LEBs), replace = TRUE),10000, nrow(LEBs))
-boot.statistics <- apply(boot.samples, 1, mean)
-RATE_LEB<-data.frame(treatment="with LEB",mean=mean(boot.statistics),
-                         lcl=quantile(boot.statistics,0.025),ucl=quantile(boot.statistics,0.975))
+LEB.samples <- matrix(sample(LEBs$BPUE, size = 10000 * nrow(LEBs), replace = TRUE),10000, nrow(LEBs))
+LEB.statistics <- apply(LEB.samples, 1, mean)
+RATE_LEB<-data.frame(treatment="with LEB",mean=mean(LEB.statistics),
+                         lcl=quantile(LEB.statistics,0.025),ucl=quantile(LEB.statistics,0.975))
+
+RATE_DIFF<-data.frame(treatment="difference",mean=mean(LEB.statistics-boot.statistics),
+                     lcl=quantile(LEB.statistics-boot.statistics,0.025),ucl=quantile(LEB.statistics-boot.statistics,0.975))
+(RATE_DIFF[,2:4]/RATE_control[,2:4])*100
+
+
 
 
 ### PLOT predicted OUTPUT ###
@@ -80,7 +91,7 @@ bind_rows(RATE_control,RATE_LEB) %>%
   geom_errorbar(aes(ymin=lcl, ymax=ucl), width=.03)+
   scale_y_continuous(limits=c(0,0.5), breaks=seq(0,0.5,0.1)) +
   xlab("") +
-  ylab("Number of cormorants in fishtrap over 5 days") +
+  ylab("Bycatch in fishtrap over 5 days") +
   theme(panel.background=element_rect(fill="white", colour="black"), 
         axis.text=element_text(size=16, color="black"), 
         axis.title=element_text(size=18), 
