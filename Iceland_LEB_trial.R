@@ -210,11 +210,11 @@ sets[,c(2,8,21:35)] %>% gather(key="Species", value="Catch",-fishing_trip_id,-tr
 
 #####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
 #####
-#####    CONDUCT SIMPLE BOOTSTRAP ANALYSIS USING ALL DATA ###   ~~~~~~~~~~~~~~~~~~~~~~~~~~########
+#####    CONDUCT MATCHED DEPTH BOOTSTRAP ANALYSIS          ###   ~~~~~~~~~~~~~~~~~~~~~~~~~~########
 #####
 #####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
 
-### COMMENTED OUT ON 12 JULY 2022 AFTER IMPROVED BOOTSTRAP WITH MATCHING DEPTH BELOW
+### REMOVED SIMPLE BOOTSTRAP ON 12 JULY 2022 AFTER IMPROVED BOOTSTRAP WITH MATCHING DEPTH BELOW
 # 
 # #### NEED TO RUN THIS CODE TWICE: WITH AND WITHOUT OBSERVER DATA LIMITATION
 # 
@@ -225,177 +225,132 @@ try(setwd("C:\\STEFFEN\\OneDrive - THE ROYAL SOCIETY FOR THE PROTECTION OF BIRDS
 
 controls<- data %>% filter(EXP=="control") %>% filter(observer==1)
 LEBs<- data %>% filter(EXP=="LEB") %>% filter(observer==1)
-# 
-# #### ALL BIRD BYCATCH BOOTSTRAP TEST ####
-# 
-# LEB.samples <- matrix(sample(LEBs$BPUE, size = 10000 * nrow(LEBs), replace = TRUE),10000, nrow(LEBs))
-# LEB.statistics <- apply(LEB.samples, 1, mean)
-# RATE_LEB<-data.frame(treatment="with LEB",mean=mean(LEB.statistics),
-#                      lcl=quantile(LEB.statistics,0.025),ucl=quantile(LEB.statistics,0.975))
-# 
-# 
-# ## APPROACH 1 - take random control trossa
+
+## ~~~~~~~~ commented out because it takes 2 hrs to run ~~~~~~~~~~~  ##
+# ## FORMERLY CALLED APPROACH 2 - calculate difference per fishing trip and then bootstrap over difference
 # ## because we have multiple control nets per LEB, we have two layers of random sampling
 # ## we ensure that a sample is taken from each fishing trip by looping over trips
-# control.samples<-matrix(NA,nrow=10000, ncol=length(unique(LEBs$fishing_trip_id)))
-# for (x in unique(LEBs$fishing_trip_id)){
-#   control.samples[,match(x,unique(LEBs$fishing_trip_id))]<-matrix(sample(controls$BPUE[controls$fishing_trip_id==x], size = 10000, replace = TRUE),10000, 1)
+# # abandoned on 27 June as it is incredibly slow
+# # resurrected on 11 July 2022 to include the depth matching of LEB and control nets
+# # no longer calculates difference per fishing trip, but matches sampling from same trips
+# # because of very long loop, calculate all matrices in the same loop
+# 
+# bootstraps<-10000
+# # one execution takes 0.06983399 sec, so calculate length of duration as
+# (round(0.06983399,2) * bootstraps * nrow(LEBs))/3600  ## in hours
+# 
+# boot.samples <- matrix(sample(LEBs$fishing_trip_id, size = bootstraps * nrow(LEBs), replace = TRUE),bootstraps, nrow(LEBs))
+# LEB.samples <- array(NA,dim=c(bootstraps, nrow(LEBs),5),dimnames=list(NULL,NULL,c("BPUE","EPUE","GPUE","LPUE","CPUE")))
+# control.samples <- array(NA,dim=c(bootstraps, nrow(LEBs),5),dimnames=list(NULL,NULL,c("BPUE","EPUE","GPUE","LPUE","CPUE")))
+# 
+# boot.samples.obs <- matrix(sample(LEBs$fishing_trip_id[LEBs$observer==1], size = bootstraps * nrow(LEBs), replace = TRUE),bootstraps, nrow(LEBs[LEBs$observer==1,]))
+# LEB.samples.obs <- array(NA,dim=c(bootstraps, nrow(LEBs[LEBs$observer==1,]),5),dimnames=list(NULL,NULL,c("BPUE","EPUE","GPUE","LPUE","CPUE")))
+# control.samples.obs <- array(NA,dim=c(bootstraps, nrow(LEBs[LEBs$observer==1,]),5),dimnames=list(NULL,NULL,c("BPUE","EPUE","GPUE","LPUE","CPUE")))
+# 
+# for(row in 1:bootstraps){
+#   for (col in 1:nrow(LEBs)){
+#     #start_time <- Sys.time()
+#     xd<- data %>% filter(fishing_trip_id==boot.samples[row,col])
+#     mean_depth<-mean(xd$depth[xd$EXP=="LEB"])  ## take mean for the odd trip with 2 LEBs
+#     target_depth<-rnorm(1,mean_depth,5)
+#     LEB.samples[row,col,1:5] <- xd %>% filter(EXP=="LEB") %>%
+#       sample_n(1) %>%
+#       select(BPUE,EPUE,GPUE,LPUE,CPUE) %>%
+#       unlist()
+#     
+#     control.samples[row,col,1:5] <-xd %>% filter(EXP=="control") %>%
+#                                         mutate(target=target_depth) %>%
+#                                         mutate(diff=abs(depth-target_depth)) %>%
+#                                         filter(diff==min(diff)) %>%
+#                                         sample_n(1) %>%
+#                                         select(BPUE,EPUE,GPUE,LPUE,CPUE) %>%
+#                                         unlist()
+#     
+#     ### use only observer data ###
+#     if(col <= nrow(LEBs[LEBs$observer==1,])){
+#       xdo<- data %>% filter(fishing_trip_id==boot.samples.obs[row,col])
+#       mean_depth<-mean(xdo$depth[xdo$EXP=="LEB"])  ## take mean for the odd trip with 2 LEBs
+#       target_depth<-rnorm(1,mean_depth,5)
+#       LEB.samples.obs[row,col,1:5] <- xdo %>% filter(EXP=="LEB") %>%
+#         sample_n(1) %>%
+#         select(BPUE,EPUE,GPUE,LPUE,CPUE) %>%
+#         unlist()
+#       
+#       control.samples.obs[row,col,1:5] <-xdo %>% filter(EXP=="control") %>%
+#         mutate(target=target_depth) %>%
+#         mutate(diff=abs(depth-target_depth)) %>%
+#         filter(diff==min(diff)) %>%
+#         sample_n(1) %>%
+#         select(BPUE,EPUE,GPUE,LPUE,CPUE) %>%
+#         unlist()
+#     } ## close if loop for observer data
+#     #end_time <- Sys.time()
+#     #end_time - start_time
+#   } ## close loop over row of fishing trips
+#   print(sprintf("finished bootstrap %i",row))
+# } ## close loop over bootstrap samples
+# 
+# 
+# 
+# ### SUMMARISE ALL BOOTSTRAP SAMPLES
+# metrics<-c("all birds","common eider","black and common guillemots","long-tailed duck","fish catch")
+# allout<-data.frame()
+# rawout<-data.frame()
+# for(m in 1:length(metrics)) {
+#   LEB.statistics <- apply(LEB.samples[,,m], 1, mean)
+#   RATE_LEB<-data.frame(treatment="with LEB",mean=median(LEB.statistics),
+#                        lcl=quantile(LEB.statistics,0.025),ucl=quantile(LEB.statistics,0.975))
+#   control.statistics <- apply(control.samples[,,m], 1, mean)
+#   RATE_control<-data.frame(treatment="control",mean=median(control.statistics, na.rm=T),
+#                            lcl=quantile(control.statistics,0.025, na.rm=T),ucl=quantile(control.statistics,0.975, na.rm=T))
+#   
+#   ## OUTPUT FOR REPORT
+#   rawout<-bind_rows(RATE_LEB,RATE_control) %>%
+#     mutate(metric=metrics[m]) %>% mutate(obs="all data") %>%
+#     bind_rows(rawout)
+#   
+#   ## summarise for plot
+#   allout<-data.frame(mean=quantile(LEB.statistics-control.statistics,0.5)*2000, lcl=quantile(LEB.statistics-control.statistics,0.025)*2000,ucl=quantile(LEB.statistics-control.statistics,0.975)*2000) %>%
+#     mutate(metric=metrics[m]) %>% mutate(obs="all data") %>%
+#     bind_rows(allout)
 # }
-# control.statistics <- apply(control.samples, 1, mean)
-# RATE_control<-data.frame(treatment="control",mean=mean(control.statistics, na.rm=T),
-#                          lcl=quantile(control.statistics,0.025, na.rm=T),ucl=quantile(control.statistics,0.975, na.rm=T))
 # 
-# ## OUTPUT FOR REPORT
-# RATE_LEB[,2:4]*2000
-# RATE_control[,2:4]*2000
-# #(RATE_LEB[,2:4]-RATE_control[,2:4])*100
-# #tout<-t.test(LEB.statistics,control.statistics)
-# 
-# ## summarise for plot
-# out1<-data.frame(mean=quantile(LEB.statistics-control.statistics,0.5)*2000, lcl=quantile(LEB.statistics-control.statistics,0.025)*2000,ucl=quantile(LEB.statistics-control.statistics,0.975)*2000) %>%
-#   mutate(metric="all birds")
-# 
-# 
-# #### ALL FISH CATCH BOOTSTRAP TEST ####
-# range(LEBs$CPUE)
-# range(controls$CPUE)
-# LEB.samples <- matrix(sample(LEBs$CPUE, size = 10000 * nrow(LEBs), replace = TRUE),10000, nrow(LEBs))
-# LEB.statistics <- apply(LEB.samples, 1, mean)
-# RATE_LEB<-data.frame(treatment="with LEB",mean=mean(LEB.statistics),
-#                      lcl=quantile(LEB.statistics,0.025),ucl=quantile(LEB.statistics,0.975))
-# 
-# control.samples<-matrix(NA,nrow=10000, ncol=length(unique(LEBs$fishing_trip_id)))
-# for (x in unique(LEBs$fishing_trip_id)){
-#   control.samples[,match(x,unique(LEBs$fishing_trip_id))]<-matrix(sample(controls$CPUE[controls$fishing_trip_id==x], size = 10000, replace = TRUE),10000, 1)
+# for(m in 1:length(metrics)) {
+#   LEB.statistics <- apply(LEB.samples.obs[,,m], 1, mean)
+#   RATE_LEB<-data.frame(treatment="with LEB",mean=median(LEB.statistics),
+#                        lcl=quantile(LEB.statistics,0.025),ucl=quantile(LEB.statistics,0.975))
+#   control.statistics <- apply(control.samples.obs[,,m], 1, mean)
+#   RATE_control<-data.frame(treatment="control",mean=median(control.statistics, na.rm=T),
+#                            lcl=quantile(control.statistics,0.025, na.rm=T),ucl=quantile(control.statistics,0.975, na.rm=T))
+#   
+#   ## OUTPUT FOR REPORT
+#   rawout<-bind_rows(RATE_LEB,RATE_control) %>%
+#     mutate(metric=metrics[m]) %>% mutate(obs="only observer data") %>%
+#     bind_rows(rawout)
+#   
+#   ## summarise for plot
+#   allout<-data.frame(mean=quantile(LEB.statistics-control.statistics,0.5)*2000, lcl=quantile(LEB.statistics-control.statistics,0.025)*2000,ucl=quantile(LEB.statistics-control.statistics,0.975)*2000) %>%
+#     mutate(metric=metrics[m]) %>% mutate(obs="only observer data") %>%
+#     bind_rows(allout)
 # }
-# control.statistics <- apply(control.samples, 1, mean)
-# RATE_control<-data.frame(treatment="control",mean=mean(control.statistics, na.rm=T),
-#                          lcl=quantile(control.statistics,0.025, na.rm=T),ucl=quantile(control.statistics,0.975, na.rm=T))
 # 
-# ## OUTPUT FOR REPORT
-# RATE_LEB[,2:4]*2000
-# RATE_control[,2:4]*2000
-# #(RATE_LEB[,2:4]-RATE_control[,2:4])*2000
-# #t.test(LEB.statistics,control.statistics, paired=T)
+# ### SAVE OUTPUT TO CSV
+# ## first convert to mean trossa day
+# rawout<-rawout %>%
+#   mutate(mean=mean*2000,lcl=lcl*2000,ucl=ucl*2000) %>%
+#   select(obs,metric,treatment,mean,lcl,ucl) %>%
+#   arrange(obs,metric,treatment)
 # 
-# ## summarise for plot
-# data.frame(median=quantile(LEB.statistics-control.statistics,0.5)*2000, lcl=quantile(LEB.statistics-control.statistics,0.025)*2000,ucl=quantile(LEB.statistics-control.statistics,0.975)*2000) %>%
-#   mutate(metric="fish catch")
-
-## summarise for plot
-# out2<-as.data.frame((RATE_LEB[,2:4]-RATE_control[,2:4])*100) %>%
-#   mutate(metric="fish catch")
-# rm(boot.samples,diff.samples)
-# boot.samples<-data.frame()
-# for(s in 1:1000){
-#   diff.samples<-data.frame(fishing_trip_id=unique(LEBs$fishing_trip_id))
-#   for (x in unique(LEBs$fishing_trip_id)){
-#     xd<- data %>% filter(fishing_trip_id==x)
-#     diff.samples$LEB[diff.samples$fishing_trip_id==x] <- xd %>% filter(EXP=="LEB") %>% select(CPUE) %>% unlist()
-#     diff.samples$control[diff.samples$fishing_trip_id==x] <-sample(x=(xd %>% filter(EXP=="control") %>% select(CPUE) %>% unlist()),size=1)
-#   }
-#   boot.samples<-rbind(boot.samples,diff.samples)
-# }
-# dim(boot.samples)
+# allout<-allout %>%
+#   select(obs,metric,mean,lcl,ucl)%>%
+#   arrange(obs,metric)
 # 
-# 
-# ## summarise and plot
-# out2<-boot.samples %>% mutate(diff=control-LEB) %>%
-#   summarise(mean=mean(diff),lcl=quantile(diff,0.025),ucl=quantile(diff,0.975)) %>%
-#   mutate(metric="fish catch")
-
-
-
-# #### COMMON EIDER BYCATCH BOOTSTRAP TEST ####
-# range(LEBs$EPUE)
-# range(controls$EPUE)
-# LEB.samples <- matrix(sample(LEBs$EPUE, size = 10000 * nrow(LEBs), replace = TRUE),10000, nrow(LEBs))
-# LEB.statistics <- apply(LEB.samples, 1, mean)
-# RATE_LEB<-data.frame(treatment="with LEB",mean=mean(LEB.statistics),
-#                      lcl=quantile(LEB.statistics,0.025),ucl=quantile(LEB.statistics,0.975))
-# 
-# control.samples<-matrix(NA,nrow=10000, ncol=length(unique(LEBs$fishing_trip_id)))
-# for (x in unique(LEBs$fishing_trip_id)){
-#   control.samples[,match(x,unique(LEBs$fishing_trip_id))]<-matrix(sample(controls$EPUE[controls$fishing_trip_id==x], size = 10000, replace = TRUE),10000, 1)
-# }
-# control.statistics <- apply(control.samples, 1, mean)
-# RATE_control<-data.frame(treatment="control",mean=mean(control.statistics, na.rm=T),
-#                          lcl=quantile(control.statistics,0.025, na.rm=T),ucl=quantile(control.statistics,0.975, na.rm=T))
-# 
-# ## OUTPUT FOR REPORT
-# RATE_LEB[,2:4]*2000
-# RATE_control[,2:4]*2000
-# #(RATE_LEB[,2:4]-RATE_control[,2:4])*2000
-# #t.test(LEB.statistics,control.statistics, paired=T)
-# 
-# ## summarise for plot
-# out3<-data.frame(mean=quantile(LEB.statistics-control.statistics,0.5)*2000, lcl=quantile(LEB.statistics-control.statistics,0.025)*2000,ucl=quantile(LEB.statistics-control.statistics,0.975)*2000) %>%
-#   mutate(metric="common eider")
-# 
-# 
-# 
-# 
-# #### GUILLEMOT BYCATCH BOOTSTRAP TEST ####
-# range(LEBs$GPUE)
-# range(controls$GPUE)
-# LEB.samples <- matrix(sample(LEBs$GPUE, size = 10000 * nrow(LEBs), replace = TRUE),10000, nrow(LEBs))
-# LEB.statistics <- apply(LEB.samples, 1, mean)
-# RATE_LEB<-data.frame(treatment="with LEB",mean=mean(LEB.statistics),
-#                      lcl=quantile(LEB.statistics,0.025),ucl=quantile(LEB.statistics,0.975))
-# 
-# control.samples<-matrix(NA,nrow=10000, ncol=length(unique(LEBs$fishing_trip_id)))
-# for (x in unique(LEBs$fishing_trip_id)){
-#   control.samples[,match(x,unique(LEBs$fishing_trip_id))]<-matrix(sample(controls$GPUE[controls$fishing_trip_id==x], size = 10000, replace = TRUE),10000, 1)
-# }
-# control.statistics <- apply(control.samples, 1, mean)
-# RATE_control<-data.frame(treatment="control",mean=mean(control.statistics, na.rm=T),
-#                          lcl=quantile(control.statistics,0.025, na.rm=T),ucl=quantile(control.statistics,0.975, na.rm=T))
-# 
-# ## OUTPUT FOR REPORT
-# RATE_LEB[,2:4]*2000
-# RATE_control[,2:4]*2000
-# #(RATE_LEB[,2:4]-RATE_control[,2:4])*2000
-# #t.test(LEB.statistics,control.statistics, paired=T)
-# 
-# ## summarise for plot
-# out4<-data.frame(mean=quantile(LEB.statistics-control.statistics,0.5)*2000, lcl=quantile(LEB.statistics-control.statistics,0.025)*2000,ucl=quantile(LEB.statistics-control.statistics,0.975)*2000) %>%
-#   mutate(metric="black and common guillemots")
-# 
-# 
-# #### LONG-TAILED DUCK BYCATCH BOOTSTRAP TEST ####
-# range(LEBs$LPUE)
-# table(controls$LPUE)
-# LEB.samples <- matrix(sample(LEBs$LPUE, size = 10000 * nrow(LEBs), replace = TRUE),10000, nrow(LEBs))
-# LEB.statistics <- apply(LEB.samples, 1, mean)
-# RATE_LEB<-data.frame(treatment="with LEB",mean=mean(LEB.statistics),
-#                      lcl=quantile(LEB.statistics,0.025),ucl=quantile(LEB.statistics,0.975))
-# 
-# control.samples<-matrix(NA,nrow=10000, ncol=length(unique(LEBs$fishing_trip_id)))
-# for (x in unique(LEBs$fishing_trip_id)){
-#   control.samples[,match(x,unique(LEBs$fishing_trip_id))]<-matrix(sample(controls$LPUE[controls$fishing_trip_id==x], size = 10000, replace = TRUE),10000, 1)
-# }
-# control.statistics <- apply(control.samples, 1, mean)
-# RATE_control<-data.frame(treatment="control",mean=mean(control.statistics, na.rm=T),
-#                          lcl=quantile(control.statistics,0.025, na.rm=T),ucl=quantile(control.statistics,0.975, na.rm=T))
-# 
-# ## OUTPUT FOR REPORT
-# RATE_LEB[,2:4]*2000
-# RATE_control[,2:4]*2000
-# #(RATE_LEB[,2:4]-RATE_control[,2:4])*2000
-# #t.test(LEB.statistics,control.statistics, paired=T)
-# 
-# ## summarise for plot
-# out5<-data.frame(mean=quantile(LEB.statistics-control.statistics,0.5)*2000, lcl=quantile(LEB.statistics-control.statistics,0.025)*2000,ucl=quantile(LEB.statistics-control.statistics,0.975)*2000) %>%
-#   mutate(metric="long-tailed duck")
-# 
-# 
-# #### RUN THE CODE ABOVE ONLY FOR OBSERVER DATA AND THEN FOR ALL DATA
-# obsout<-bind_rows(out1,out3, out4, out5) %>% mutate(obs="only observer data")
-# #allout<-bind_rows(out1,out3, out4, out5) %>% mutate(obs="all data")
-# 
+# #fwrite(allout,"Iceland_LEB_bootstrap_differences.csv")
+# #fwrite(rawout,"Iceland_LEB_bootstrap_bycatch_rates.csv")
 # 
 # ### CREATE SUMMARY PLOT OF ALL TARGET GROUPS
-# bind_rows(obsout,allout) %>% group_by(obs) %>%
+# allout %>% filter(metric != "fish catch") %>%
+#   group_by(obs) %>%
 #   
 #   ggplot(aes(y=mean, x=metric,colour=obs)) + geom_point(size=2, position=position_dodge(width=0.2))+
 #   geom_errorbar(aes(ymin=lcl, ymax=ucl), width=.03, position=position_dodge(width=0.2))+
@@ -417,163 +372,7 @@ LEBs<- data %>% filter(EXP=="LEB") %>% filter(observer==1)
 #         panel.grid.minor = element_blank(), 
 #         panel.border = element_blank())
 # 
-# ggsave("Iceland_LEB_trial_bycatch_difference.jpg", width=11, height=8)
-# 
-
-
-#####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
-#####
-#####    CONDUCT MATCHED DEPTH BOOTSTRAP ANALYSIS          ###   ~~~~~~~~~~~~~~~~~~~~~~~~~~########
-#####
-#####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
-
-
-## FORMERLY CALLED APPROACH 2 - calculate difference per fishing trip and then bootstrap over difference
-## because we have multiple control nets per LEB, we have two layers of random sampling
-## we ensure that a sample is taken from each fishing trip by looping over trips
-# abandoned on 27 June as it is incredibly slow
-# resurrected on 11 July 2022 to include the depth matching of LEB and control nets
-# no longer calculates difference per fishing trip, but matches sampling from same trips
-# because of very long loop, calculate all matrices in the same loop
-
-bootstraps<-10000
-# one execution takes 0.06983399 sec, so calculate length of duration as
-(round(0.06983399,2) * bootstraps * nrow(LEBs))/3600  ## in hours
-
-boot.samples <- matrix(sample(LEBs$fishing_trip_id, size = bootstraps * nrow(LEBs), replace = TRUE),bootstraps, nrow(LEBs))
-LEB.samples <- array(NA,dim=c(bootstraps, nrow(LEBs),5),dimnames=list(NULL,NULL,c("BPUE","EPUE","GPUE","LPUE","CPUE")))
-control.samples <- array(NA,dim=c(bootstraps, nrow(LEBs),5),dimnames=list(NULL,NULL,c("BPUE","EPUE","GPUE","LPUE","CPUE")))
-
-boot.samples.obs <- matrix(sample(LEBs$fishing_trip_id[LEBs$observer==1], size = bootstraps * nrow(LEBs), replace = TRUE),bootstraps, nrow(LEBs[LEBs$observer==1,]))
-LEB.samples.obs <- array(NA,dim=c(bootstraps, nrow(LEBs[LEBs$observer==1,]),5),dimnames=list(NULL,NULL,c("BPUE","EPUE","GPUE","LPUE","CPUE")))
-control.samples.obs <- array(NA,dim=c(bootstraps, nrow(LEBs[LEBs$observer==1,]),5),dimnames=list(NULL,NULL,c("BPUE","EPUE","GPUE","LPUE","CPUE")))
-
-for(row in 1:bootstraps){
-  for (col in 1:nrow(LEBs)){
-    #start_time <- Sys.time()
-    xd<- data %>% filter(fishing_trip_id==boot.samples[row,col])
-    mean_depth<-mean(xd$depth[xd$EXP=="LEB"])  ## take mean for the odd trip with 2 LEBs
-    target_depth<-rnorm(1,mean_depth,5)
-    LEB.samples[row,col,1:5] <- xd %>% filter(EXP=="LEB") %>%
-      sample_n(1) %>%
-      select(BPUE,EPUE,GPUE,LPUE,CPUE) %>%
-      unlist()
-    
-    control.samples[row,col,1:5] <-xd %>% filter(EXP=="control") %>%
-                                        mutate(target=target_depth) %>%
-                                        mutate(diff=abs(depth-target_depth)) %>%
-                                        filter(diff==min(diff)) %>%
-                                        sample_n(1) %>%
-                                        select(BPUE,EPUE,GPUE,LPUE,CPUE) %>%
-                                        unlist()
-    
-    ### use only observer data ###
-    if(col <= nrow(LEBs[LEBs$observer==1,])){
-      xdo<- data %>% filter(fishing_trip_id==boot.samples.obs[row,col])
-      mean_depth<-mean(xdo$depth[xdo$EXP=="LEB"])  ## take mean for the odd trip with 2 LEBs
-      target_depth<-rnorm(1,mean_depth,5)
-      LEB.samples.obs[row,col,1:5] <- xdo %>% filter(EXP=="LEB") %>%
-        sample_n(1) %>%
-        select(BPUE,EPUE,GPUE,LPUE,CPUE) %>%
-        unlist()
-      
-      control.samples.obs[row,col,1:5] <-xdo %>% filter(EXP=="control") %>%
-        mutate(target=target_depth) %>%
-        mutate(diff=abs(depth-target_depth)) %>%
-        filter(diff==min(diff)) %>%
-        sample_n(1) %>%
-        select(BPUE,EPUE,GPUE,LPUE,CPUE) %>%
-        unlist()
-    } ## close if loop for observer data
-    #end_time <- Sys.time()
-    #end_time - start_time
-  } ## close loop over row of fishing trips
-  print(sprintf("finished bootstrap %i",row))
-} ## close loop over bootstrap samples
-
-
-
-### SUMMARISE ALL BOOTSTRAP SAMPLES
-metrics<-c("all birds","common eider","black and common guillemots","long-tailed duck","fish catch")
-allout<-data.frame()
-rawout<-data.frame()
-for(m in 1:length(metrics)) {
-  LEB.statistics <- apply(LEB.samples[,,m], 1, mean)
-  RATE_LEB<-data.frame(treatment="with LEB",mean=median(LEB.statistics),
-                       lcl=quantile(LEB.statistics,0.025),ucl=quantile(LEB.statistics,0.975))
-  control.statistics <- apply(control.samples[,,m], 1, mean)
-  RATE_control<-data.frame(treatment="control",mean=median(control.statistics, na.rm=T),
-                           lcl=quantile(control.statistics,0.025, na.rm=T),ucl=quantile(control.statistics,0.975, na.rm=T))
-  
-  ## OUTPUT FOR REPORT
-  rawout<-bind_rows(RATE_LEB,RATE_control) %>%
-    mutate(metric=metrics[m]) %>% mutate(obs="all data") %>%
-    bind_rows(rawout)
-  
-  ## summarise for plot
-  allout<-data.frame(mean=quantile(LEB.statistics-control.statistics,0.5)*2000, lcl=quantile(LEB.statistics-control.statistics,0.025)*2000,ucl=quantile(LEB.statistics-control.statistics,0.975)*2000) %>%
-    mutate(metric=metrics[m]) %>% mutate(obs="all data") %>%
-    bind_rows(allout)
-}
-
-for(m in 1:length(metrics)) {
-  LEB.statistics <- apply(LEB.samples.obs[,,m], 1, mean)
-  RATE_LEB<-data.frame(treatment="with LEB",mean=median(LEB.statistics),
-                       lcl=quantile(LEB.statistics,0.025),ucl=quantile(LEB.statistics,0.975))
-  control.statistics <- apply(control.samples.obs[,,m], 1, mean)
-  RATE_control<-data.frame(treatment="control",mean=median(control.statistics, na.rm=T),
-                           lcl=quantile(control.statistics,0.025, na.rm=T),ucl=quantile(control.statistics,0.975, na.rm=T))
-  
-  ## OUTPUT FOR REPORT
-  rawout<-bind_rows(RATE_LEB,RATE_control) %>%
-    mutate(metric=metrics[m]) %>% mutate(obs="only observer data") %>%
-    bind_rows(rawout)
-  
-  ## summarise for plot
-  allout<-data.frame(mean=quantile(LEB.statistics-control.statistics,0.5)*2000, lcl=quantile(LEB.statistics-control.statistics,0.025)*2000,ucl=quantile(LEB.statistics-control.statistics,0.975)*2000) %>%
-    mutate(metric=metrics[m]) %>% mutate(obs="only observer data") %>%
-    bind_rows(allout)
-}
-
-### SAVE OUTPUT TO CSV
-## first convert to mean trossa day
-rawout<-rawout %>%
-  mutate(mean=mean*2000,lcl=lcl*2000,ucl=ucl*2000) %>%
-  select(obs,metric,treatment,mean,lcl,ucl) %>%
-  arrange(obs,metric,treatment)
-
-allout<-allout %>%
-  select(obs,metric,mean,lcl,ucl)%>%
-  arrange(obs,metric)
-
-#fwrite(allout,"Iceland_LEB_bootstrap_differences.csv")
-#fwrite(rawout,"Iceland_LEB_bootstrap_bycatch_rates.csv")
-
-### CREATE SUMMARY PLOT OF ALL TARGET GROUPS
-allout %>% filter(metric != "fish catch") %>%
-  group_by(obs) %>%
-  
-  ggplot(aes(y=mean, x=metric,colour=obs)) + geom_point(size=2, position=position_dodge(width=0.2))+
-  geom_errorbar(aes(ymin=lcl, ymax=ucl), width=.03, position=position_dodge(width=0.2))+
-  labs(colour='Data source:') +
-  scale_y_continuous(limits=c(-0.5,0.5), breaks=seq(-0.5,0.5,0.1)) +
-  geom_hline(aes(yintercept=0), colour="darkgrey", linetype=2) +
-  xlab("") +
-  ylab("Bycatch difference in trossa per day with LEB") +
-  theme(panel.background=element_rect(fill="white", colour="black"), 
-        axis.text=element_text(size=16, color="black"), 
-        axis.title=element_text(size=18), 
-        strip.text=element_text(size=18, color="black"),
-        legend.text=element_text(size=14, color="black"),
-        legend.title=element_text(size=18, color="black"),
-        legend.key=element_blank(),
-        legend.position=c(0.2,0.1),
-        strip.background=element_rect(fill="white", colour="black"), 
-        panel.grid.major = element_blank(), 
-        panel.grid.minor = element_blank(), 
-        panel.border = element_blank())
-
-#ggsave("Iceland_LEB_trial_bycatch_difference.jpg", width=11, height=8)
+# #ggsave("Iceland_LEB_trial_bycatch_difference.jpg", width=11, height=8)
 
 
 
