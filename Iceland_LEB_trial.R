@@ -460,7 +460,7 @@ ggplot(IMP, aes(x=variable, y=IMP)) +
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
 
 ## NEED TO REMOVE NAs from data frame before plot works
-jpeg("LEB_Iceland_partial_plots.jpg", width=9, height=12, units="in", res=100)
+#jpeg("LEB_Iceland_partial_plots.jpg", width=9, height=12, units="in", res=100)
 par(mfrow=c(3,2), oma=c(1,3,0,0))
 ### depth ####
 partialPlot(x=RFbinaryobs, pred.data=as.data.frame(data[!is.na(data$depth),]),
@@ -515,7 +515,7 @@ labels=format(seq(from=ymd("2022-03-21"), to=ymd("2022-05-20"),by="10 days"),for
 
 mtext("Partial contribution to predict bycatch",side=2,outer=T,cex=1.7,line=1)
 
-dev.off()
+#dev.off()
 
 
 #fwrite(data,"Iceland_LEB_trial_data_used.csv")
@@ -1038,13 +1038,109 @@ data  %>%
 # simulate redistribution of fishing effort from <40 m to deeper depths and re-calculate bycatch and fish catch
 # this ignores potential availability of water at that depth with sufficient fish ressource
 
-depthlandings<-data.frame(depth=c(0,10,20,30,40,50),landings=c(0.13,0.34,0.18,0.13,0.1,0.13))
+
+## landings data
+depthlandings<-data.frame(depth=c(0,10,20,30,40,50),landings=c(0.13,0.34,0.18,0.13,0.1,0.12))
 seasonlandings<-data.frame(month=c(3,4,5,6,7,8),landings=c(0.07,0.45,0.30,0.12,0.05,0.01))
+landings<-data.frame(year=seq(2014,2021),tons=c(4074,6474,5504,4565,4516,5044,5315,7601))
+
+## catch and bycatch per depth category
+depthrates<-depthdata  %>% ungroup() %>%
+  mutate(depth=ifelse(depth<10,0,ifelse(depth<20,10,ifelse(depth<30,20,ifelse(depth<40,30,ifelse(depth<50,40,50)))))) %>%
+  dplyr::select(depth, CPUE, BPUE) %>%
+  gather(key="type",value="catch",-depth) %>%
+  mutate(type=ifelse(type=="CPUE","fish","birds")) %>% #filter(water==20 & type=="birds" & catch>0) %>% ggplot() + geom_histogram(aes(x=catch))
+  group_by(type,depth) %>%
+  summarise(mean=mean(catch),lcl=stats::quantile(catch,0.025),ucl=stats::quantile(catch,0.975))
+
+## apportion the tons of fish to depth categories in each year to calculate effort
+deptheffort<-bind_rows(landings,landings,landings,landings,landings,landings) %>%
+  mutate(depth=rep(depthlandings$depth,each=length(landings$year)), prop=rep(depthlandings$landings,each=length(landings$year))) %>%
+  mutate(depthcatch=prop*tons) %>%
+  arrange(year,depth) %>%
+  left_join(depthrates %>% filter(type=="fish"), by="depth") %>%
+  mutate(effort=(depthcatch/0.0055)/mean, effort.lcl=(depthcatch/0.0055)/lcl,effort.ucl=(depthcatch/0.0055)/ucl)   ## assuming that one fish weighs 5.5 kg or 0.0055 tons
+
+## extrapolate the estimated effort at depth categories to bycatch rates to estimate total bycatch per depth
+depthbycatch<-deptheffort %>%
+  select(year, tons,depth, depthcatch,effort,effort.lcl,effort.ucl) %>%
+  left_join(depthrates %>% filter(type=="birds"), by="depth") %>%
+  mutate(bycatch=mean*effort, bycatch.ucl=ucl*effort.ucl)   ## assuming that one fish weighs 5.5 kg or 0.0055 tons
+
+BYCATCH_TOTAL_BASELINE<-depthbycatch %>% group_by(year) %>%
+  summarise(fish=sum(depthcatch),birds=sum(bycatch),birds.ucl=sum(bycatch.ucl))
+
+fwrite(depthbycatch,"Iceland_total_bycatch_per_depth.csv")
+  
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#####  SIMULATE FISHING CLOSURE AT CERTAIN DEPTH AND REALLOCATION OF EFFORT TO DEEPER WATER ###########
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+
+## assume fishing closed in waters <40m depth
+## all fishing effort would go into water >40 m depth
+
+closure_depth_simulation<-data.frame()
+
+for(d in c(10, 20, 30, 40, 50)) {
+  for (y in unique(BYCATCH_TOTAL_BASELINE$year)) {
+    yeff <- deptheffort %>% filter(year == y) %>%
+      mutate(IN = if_else(depth >= d, 1, 0))
+    
+    ### summarise effort in closed waters and redistribute to open waters
+    mean.eff.add <-
+      sum(yeff$effort[yeff$IN == 0]) / length(yeff$effort[yeff$IN == 1])
+    max.eff.add <-
+      sum(yeff$effort.ucl[yeff$IN == 0]) / length(yeff$effort[yeff$IN == 1])
+    
+    out <- yeff %>% filter(IN == 1) %>%
+      mutate(effort = effort + mean.eff.add,
+             effort.ucl = effort.ucl + max.eff.add) %>%
+      mutate(depthcatch = mean * effort * 0.0055) %>%    ### calculating fish catch when effort moved to deeper water
+      select(year, tons, depth, depthcatch, effort, effort.ucl) %>%
+      left_join(depthrates %>% filter(type == "birds"), by = "depth") %>%
+      mutate(bycatch = mean * effort,
+             bycatch.ucl = ucl * effort.ucl)  %>% group_by(year, tons) %>%
+      summarise(
+        landings = sum(depthcatch),
+        bycatch = sum(bycatch),
+        bycatch.ucl = sum(bycatch.ucl)
+      ) %>%
+      mutate(closure_depth = d)
+    
+    closure_depth_simulation <- bind_rows(closure_depth_simulation, out)
+  }
+}
 
 
 
+#### CALCULATING RELATIVE CHANGE IN FISH CATCH AND CHANGE IN BIRD BYCATCH
 
+closure_depth_simulation %>% left_join(BYCATCH_TOTAL_BASELINE, by="year") %>%
+  mutate(lumpfish=((landings-fish)/fish)*100,
+         seabirds=((bycatch-birds)/birds)*100,
+         bird_max_change=((bycatch.ucl-birds.ucl)/birds.ucl)*100) %>%
+  select(year,closure_depth,lumpfish,seabirds) %>%
+  gather(key="Species",value="change",-year,-closure_depth) %>%
+  mutate(Species=ifelse(Species=="seabirds","seabird bycatch","target lumpfish catch")) %>%
+  rename(Category=Species) %>%
+  filter(year==2021) %>%   ## all years have the same proportional change in reduction
+  
+  ggplot() +
+  geom_bar(aes(y = change, x = closure_depth, fill = Category), stat="identity",position="dodge")+
+  geom_hline(aes(yintercept=0), linetype="dashed", size=1)+
+  ylab("Change in total catch per year (in %)") +
+  xlab("Closure depth for fishing (m)") +
+  theme(panel.background=element_rect(fill="white", colour="black"), 
+        axis.text=element_text(size=16, color="black"), 
+        axis.title=element_text(size=18),
+        legend.text=element_text(size=16, color="black"),
+        legend.title=element_text(size=18, color="black"),
+        legend.position=c(0.15,0.1),
+        strip.background=element_rect(fill="white", colour="black"), 
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.border = element_blank())
 
-
-
+ggsave("Iceland_bycatch_reduction_depth_closure.jpg", width=12, height=8)
 
