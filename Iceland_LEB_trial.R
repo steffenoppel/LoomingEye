@@ -116,6 +116,39 @@ iceland <- ne_countries(scale = 10, country = "Iceland", returnclass = "sf")
 d1_sf <- data %>% st_as_sf(coords = c('lon','lat')) %>% 
   st_set_crs(4326)
 
+## create a plot of the island with location of sample nets
+
+ggplot() +
+  geom_sf(data=iceland, color = "black", lwd=0.5, fill="khaki") +  ###  "khaki"
+  coord_sf(ylim = c(min(data$lat, na.rm=T)-0.3,max(data$lat, na.rm=T)+0.3),  xlim = c(min(data$lon, na.rm=T)-0.3,max(data$lon, na.rm=T)+0.3))+
+  
+  ## add death locations
+  geom_point(data=data, aes(x=lon, y=lat, colour=boat))+
+  
+  ## legends and labels  
+  #guides(size=guide_legend(title="Effort (trossa area * nights)")) +
+  guides(colour=guide_legend(title="Boat", nrow=3))+
+  
+  ## beautification of the axes
+  theme(panel.background=element_rect(fill="slategray1", colour="slategray1"),
+        panel.border = element_rect(fill=NA, colour="black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text=element_text(size=18, color="black"), 
+        axis.title=element_text(size=18), 
+        strip.text.x=element_text(size=18, color="black"), 
+        strip.background=element_rect(fill="white", colour="black"),
+        legend.text=element_text(size=12),
+        legend.title = element_text(size=14),
+        legend.background = element_blank(), #element_rect(fill="forestgreen", colour="black"),
+        legend.key = element_blank(),
+        legend.position = c(0.42,0.89)) +
+  ylab("Longitude") +
+  xlab("Latitude")
+
+ggsave("C:\\STEFFEN\\RSPB\\Marine\\Bycatch\\GillnetBycatch\\Analysis\\LoomingEye\\Map_fishing_locations.jpg", width=8, height=7, dpi=1000)
+
+
 #transform Iceland from polygon shape to line
 iceland <- st_cast(iceland, "MULTILINESTRING")
 
@@ -1143,4 +1176,20 @@ closure_depth_simulation %>% left_join(BYCATCH_TOTAL_BASELINE, by="year") %>%
         panel.border = element_blank())
 
 ggsave("Iceland_bycatch_reduction_depth_closure.jpg", width=12, height=8)
+
+
+
+#### CREATE SUMMARY TABLE OF ABSOLUTE REDUCTION PER YEAR
+SUMMARY<-closure_depth_simulation %>% left_join(BYCATCH_TOTAL_BASELINE, by="year") %>%
+  mutate(REDUCTION_birds=as.integer(bycatch-birds),
+         REDUCTION_birds_max=as.integer(bycatch.ucl-birds.ucl)) %>%
+  rename(extrapol_bycatch=birds,extrapol_bycatch_max=birds.ucl) %>%
+  rename(reduced_bycatch=bycatch,reduced_bycatch_max=bycatch.ucl) %>%
+  mutate(Baseline_bycatch=paste(as.integer(extrapol_bycatch),as.integer(extrapol_bycatch_max),sep=" - ")) %>%
+  mutate(Reduced_bycatch=paste(as.integer(reduced_bycatch),as.integer(reduced_bycatch_max),sep=" - ")) %>%
+  mutate(Reduction=paste(abs(REDUCTION_birds),abs(REDUCTION_birds_max),sep=" - ")) %>%
+  select(year,closure_depth,Baseline_bycatch,Reduced_bycatch,Reduction)
+
+fwrite(SUMMARY,"Iceland_simulated_absolute_bycatch_reduction.csv")
+
 
