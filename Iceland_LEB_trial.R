@@ -35,6 +35,18 @@
 # what would be reduction of bycatch if fishery would be curtailed to certain depth or season?
 # can we explore soak time influence on seabird bycatch rates and Lumpfish catch (to find optimal balanced soak time) 
 
+## UPDATE 15 Dec 2022 to address further questions raised by Yann:
+#  ???	Are you able to provide a more scientifically sound estimate for total birds saved each year per depth restriction category? (here I only did 9,000 birds * X% bycatch rate reduction for XXm depth limit).
+#???	Are you able to provide a breakdown for the mainly bycaught species ? (Eiders, Common Guillemot and Black Guillemot?)
+
+## UPDATE 31 JANUARY 2023
+## added Marine mammals to analysis
+
+## UPDATE 10 Feb 2023: added contour lines to map
+## COMPLETELY REARRANGED CODE TO RETAIN MOSTLY CODE RELEVANT FOR MANUSCRIPT
+
+## UPDATE 16 March 2023: examined whether extrapolation of mammals could be based on n of trips rather than extrapolated fishing effort (based on 'landings' as in n of trips returning to port, rather than amount of fish)
+## UPDATE 29 April 2023: examined whether extrapolation of birds could be based on n of trips rather than extrapolated fishing effort (based on 'landings' as in n of trips returning to port, rather than amount of fish)
 
 ### Load libraries
 library(ggplot2)
@@ -50,6 +62,11 @@ filter<-dplyr::filter
 select<-dplyr::select
 library(randomForest)
 library(pdp)
+library(ggthemes)
+library(ggsn)
+library(marmap)
+
+
 
 
 #####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
@@ -67,13 +84,14 @@ sets <- fread("Iceland_LEB_Database Final_V4.csv")
 head(sets)
 unique(sets$net_height_meshes)
 unique(sets$biopol_onboard)
+mean(sets$net_length_meters)
 
 ### CONVERT LATITUDE AND ONGITUDE
 sets$lat<- char2dms(paste0(sets$latitude_dms,'N'), chd='d', chm='m', chs='s') %>% as.numeric()
 sets$lon<- char2dms(paste0(sets$longitude_dms,'W'), chd='d', chm='m', chs='s') %>% as.numeric()
 
 ### FORMAT DATA (remove columns we don't need and format the rest)
-
+range(sets$net_in_trossa)
 data<-sets %>%
   mutate(start=ymd_hm(paste(departure_date,departure_time))) %>%
   mutate(trossa_length=as.numeric(net_in_trossa*net_length_meters)) %>%
@@ -86,17 +104,25 @@ data<-sets %>%
   mutate(common_murre=ifelse(is.na(common_murre),0,common_murre)) %>%
   mutate(`long-tailed_duck`=ifelse(is.na(`long-tailed_duck`),0,`long-tailed_duck`)) %>%
   mutate(lumpfish_per_trossa=ifelse(is.na(lumpfish_per_trossa),0,lumpfish_per_trossa)) %>%
+  mutate(harbour_seal=ifelse(is.na(harbour_seal),0,harbour_seal)) %>%
+  mutate(grey_seal=ifelse(is.na(grey_seal),0,grey_seal)) %>%
+  mutate(harp_seal=ifelse(is.na(harp_seal),0,harp_seal)) %>%
+  mutate(white_beaked_dolphin=ifelse(is.na(white_beaked_dolphin),0,white_beaked_dolphin)) %>%
+  mutate(bottlenose_dolphin=ifelse(is.na(bottlenose_dolphin),0,bottlenose_dolphin)) %>%
+  mutate(harbour_porpoise=ifelse(is.na(harbour_porpoise),0,harbour_porpoise)) %>%
+
   mutate(CPUE=lumpfish_per_trossa/effort, BPUE=birds_per_trossa/effort,
-         EPUE=common_eider/effort,GPUE=(black_guillemot+common_murre)/effort,LPUE=`long-tailed_duck`/effort) %>%
+         EPUE=common_eider/effort,GPUE=(black_guillemot+common_murre)/effort,LPUE=`long-tailed_duck`/effort,
+         MPUE=(harbour_seal+grey_seal+harp_seal+white_beaked_dolphin+bottlenose_dolphin+harbour_porpoise)/effort) %>%
   mutate(observer=ifelse(biopol_onboard %in% c("herdis","halldor"),1,0)) %>%
   mutate(depth=((min_depth_fathoms+max_depth_fathoms)/2)*1.8288) %>% ## convert depth to metres
   mutate(depth=ifelse(is.na(depth),7*1.8288,depth)) %>% ## fill in one missing value
-  select (boat,fishing_trip_id,trossa_id,EXP,start, effort,lat,lon,CPUE, BPUE,EPUE,GPUE,LPUE,birds_per_trossa,lumpfish_per_trossa,observer,depth,trossa_area,soaking_nights) %>%
+  select (boat,fishing_trip_id,trossa_id,EXP,start, effort,lat,lon,CPUE, BPUE,EPUE,GPUE,LPUE,MPUE,birds_per_trossa,lumpfish_per_trossa,observer,depth,trossa_area,soaking_nights) %>%
   mutate_if(is.character,as.factor) %>%
   mutate(bycatch_bin=ifelse(BPUE>0,1,0))
 
 dim(data)
-data %>% group_by(EXP) %>% summarise(CPUE=mean(CPUE,na.rm=T), BPUE=mean(BPUE, na.rm=T))
+data %>% group_by(EXP) %>% summarise(CPUE=mean(CPUE,na.rm=T), BPUE=mean(BPUE, na.rm=T), MPUE=mean(MPUE, na.rm=T))
 data %>% filter(is.na(CPUE))
 data %>% filter(is.na(depth))
 
@@ -111,23 +137,87 @@ data %>% filter(is.na(start))
 ## devtools::install_github("ropensci/rnaturalearthhires") 
 
 iceland <- ne_countries(scale = 10, country = "Iceland", returnclass = "sf")
+study_area <- data %>% summarise(lat=median(lat)-0.2,lon=median(lon)+0.1)
+basemap<-ggplotGrob(ggplot() +   geom_sf(data=iceland, color = "black", lwd=0.5, fill="khaki") +
+  geom_point(data = study_area, aes(x = lon, y = lat),
+             color = "indianred", size = 3, shape=15) +
+  theme(panel.background=element_rect(fill="slategray1", colour="slategray1"),
+        panel.border = element_rect(fill=NA, colour="black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text=element_blank(),
+        axis.title=element_blank(),
+        strip.text=element_blank(),
+        strip.background=element_rect(fill="white", colour="black")))  #+
+  # north(x.min = -115.5, x.max = -114,
+  #       y.min = 40.5, y.max = 41.5,
+  #       location = "topright", scale = 0.1)
+
 
 # convert data to sf object
-d1_sf <- data %>% st_as_sf(coords = c('lon','lat')) %>% 
+d1_sf <- data %>% st_as_sf(coords = c('lon','lat')) %>%
   st_set_crs(4326)
+
+
+
+#####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
+#####
+#####    CREATE FIGURE 1   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
+#####
+#####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
+
+
+# get bathymetry data
+b = getNOAA.bathy(lon1 = min(data$lon, na.rm=T)-0.3, lon2 = max(data$lon, na.rm=T)+0.3, lat1 = min(data$lat, na.rm=T)-0.3, lat2 = max(data$lat, na.rm=T)+0.3, 
+                  resolution = 1)
+
+# convert bathymetry to data frame
+bf = fortify.bathy(b)
+
 
 ## create a plot of the island with location of sample nets
 
-ggplot() +
+fishmap <- ggplot() +
   geom_sf(data=iceland, color = "black", lwd=0.5, fill="khaki") +  ###  "khaki"
   coord_sf(ylim = c(min(data$lat, na.rm=T)-0.3,max(data$lat, na.rm=T)+0.3),  xlim = c(min(data$lon, na.rm=T)-0.3,max(data$lon, na.rm=T)+0.3))+
   
   ## add death locations
-  geom_point(data=data, aes(x=lon, y=lat, colour=boat))+
+  geom_point(data=data, aes(x=lon, y=lat, colour=EXP, shape=EXP, size=EXP))+
+  
+  # add 25m contour
+  geom_contour(data = bf, 
+               aes(x=x, y=y, z=z),
+               breaks=c(-25),
+               size=c(0.3),
+               colour="grey50")+
+  
+  # add 50m contour
+  geom_contour(data = bf, 
+               aes(x=x, y=y, z=z),
+               breaks=c(-50),
+               size=c(0.6),
+               colour="grey10")+
+  
+  # add 100m contour
+  geom_contour(data = bf, 
+               aes(x=x, y=y, z=z),
+               breaks=c(-100),
+               size=c(0.6),linetype="dashed",
+               colour="black")+
   
   ## legends and labels  
   #guides(size=guide_legend(title="Effort (trossa area * nights)")) +
-  guides(colour=guide_legend(title="Boat", nrow=3))+
+  guides(colour=guide_legend(title="Trossa type", nrow=3))+
+  scale_shape_manual(values=c(16,8))+
+  scale_size_manual(values=c(0.9,1.6))+
+  guides(shape=guide_legend(title="Trossa type", nrow=1))+
+  guides(size="none")+
+  
+  ## insert scalebar
+  # scalebar(location = "bottomleft", dist = 200,
+  #            dd2km = TRUE, model = 'WGS84',           
+  #            x.min = -124.5, x.max = -114,
+  #            y.min = 33.2, y.max = 42.5) 
   
   ## beautification of the axes
   theme(panel.background=element_rect(fill="slategray1", colour="slategray1"),
@@ -142,11 +232,18 @@ ggplot() +
         legend.title = element_text(size=14),
         legend.background = element_blank(), #element_rect(fill="forestgreen", colour="black"),
         legend.key = element_blank(),
-        legend.position = c(0.42,0.89)) +
+        legend.position = c(0.42,0.95)) +
   ylab("Longitude") +
   xlab("Latitude")
 
-ggsave("C:\\STEFFEN\\RSPB\\Marine\\Bycatch\\GillnetBycatch\\Analysis\\LoomingEye\\Map_fishing_locations.jpg", width=8, height=7, dpi=1000)
+FINALPLOT <- fishmap +
+  annotation_custom(grob = basemap, xmin = -20.5, xmax = -20,
+                    ymin = 65.3, ymax = 65.5)
+
+
+# ggsave("C:\\STEFFEN\\RSPB\\Marine\\Bycatch\\GillnetBycatch\\Analysis\\LoomingEye\\Map_fishing_locations.jpg", width=8, height=9, dpi=1000)
+# ggsave("C:\\Users\\steffenoppel\\OneDrive - THE ROYAL SOCIETY FOR THE PROTECTION OF BIRDS\\STEFFEN\\MANUSCRIPTS\\in_prep\\Iceland_Lumpfish\\Fig_1.jpg", width=8, height=9, dpi=1000)
+# ggsave("C:\\STEFFEN\\OneDrive - THE ROYAL SOCIETY FOR THE PROTECTION OF BIRDS\\STEFFEN\\MANUSCRIPTS\\in_prep\\Iceland_Lumpfish\\Fig_1.jpg", width=8, height=9, dpi=1000)
 
 
 #transform Iceland from polygon shape to line
@@ -182,6 +279,8 @@ data %>% mutate(count=1) %>% group_by(fishing_trip_id,EXP) %>% summarise(N=sum(c
   group_by(EXP) %>% summarise(min=min(N), max=max(N))
 
 
+## average length and effort
+summary(data$soaking_nights)
 
 
 
@@ -259,155 +358,175 @@ try(setwd("C:\\STEFFEN\\OneDrive - THE ROYAL SOCIETY FOR THE PROTECTION OF BIRDS
 controls<- data %>% filter(EXP=="control") %>% filter(observer==1)
 LEBs<- data %>% filter(EXP=="LEB") %>% filter(observer==1)
 
-## ~~~~~~~~ commented out because it takes 2 hrs to run ~~~~~~~~~~~  ##
-# ## FORMERLY CALLED APPROACH 2 - calculate difference per fishing trip and then bootstrap over difference
-# ## because we have multiple control nets per LEB, we have two layers of random sampling
-# ## we ensure that a sample is taken from each fishing trip by looping over trips
-# # abandoned on 27 June as it is incredibly slow
-# # resurrected on 11 July 2022 to include the depth matching of LEB and control nets
-# # no longer calculates difference per fishing trip, but matches sampling from same trips
-# # because of very long loop, calculate all matrices in the same loop
-# 
-# bootstraps<-10000
-# # one execution takes 0.06983399 sec, so calculate length of duration as
-# (round(0.06983399,2) * bootstraps * nrow(LEBs))/3600  ## in hours
-# 
-# boot.samples <- matrix(sample(LEBs$fishing_trip_id, size = bootstraps * nrow(LEBs), replace = TRUE),bootstraps, nrow(LEBs))
-# LEB.samples <- array(NA,dim=c(bootstraps, nrow(LEBs),5),dimnames=list(NULL,NULL,c("BPUE","EPUE","GPUE","LPUE","CPUE")))
-# control.samples <- array(NA,dim=c(bootstraps, nrow(LEBs),5),dimnames=list(NULL,NULL,c("BPUE","EPUE","GPUE","LPUE","CPUE")))
-# 
-# boot.samples.obs <- matrix(sample(LEBs$fishing_trip_id[LEBs$observer==1], size = bootstraps * nrow(LEBs), replace = TRUE),bootstraps, nrow(LEBs[LEBs$observer==1,]))
-# LEB.samples.obs <- array(NA,dim=c(bootstraps, nrow(LEBs[LEBs$observer==1,]),5),dimnames=list(NULL,NULL,c("BPUE","EPUE","GPUE","LPUE","CPUE")))
-# control.samples.obs <- array(NA,dim=c(bootstraps, nrow(LEBs[LEBs$observer==1,]),5),dimnames=list(NULL,NULL,c("BPUE","EPUE","GPUE","LPUE","CPUE")))
-# 
-# for(row in 1:bootstraps){
-#   for (col in 1:nrow(LEBs)){
-#     #start_time <- Sys.time()
-#     xd<- data %>% filter(fishing_trip_id==boot.samples[row,col])
-#     mean_depth<-mean(xd$depth[xd$EXP=="LEB"])  ## take mean for the odd trip with 2 LEBs
-#     target_depth<-rnorm(1,mean_depth,5)
-#     LEB.samples[row,col,1:5] <- xd %>% filter(EXP=="LEB") %>%
-#       sample_n(1) %>%
-#       select(BPUE,EPUE,GPUE,LPUE,CPUE) %>%
-#       unlist()
-#     
-#     control.samples[row,col,1:5] <-xd %>% filter(EXP=="control") %>%
-#                                         mutate(target=target_depth) %>%
-#                                         mutate(diff=abs(depth-target_depth)) %>%
-#                                         filter(diff==min(diff)) %>%
-#                                         sample_n(1) %>%
-#                                         select(BPUE,EPUE,GPUE,LPUE,CPUE) %>%
-#                                         unlist()
-#     
-#     ### use only observer data ###
-#     if(col <= nrow(LEBs[LEBs$observer==1,])){
-#       xdo<- data %>% filter(fishing_trip_id==boot.samples.obs[row,col])
-#       mean_depth<-mean(xdo$depth[xdo$EXP=="LEB"])  ## take mean for the odd trip with 2 LEBs
-#       target_depth<-rnorm(1,mean_depth,5)
-#       LEB.samples.obs[row,col,1:5] <- xdo %>% filter(EXP=="LEB") %>%
-#         sample_n(1) %>%
-#         select(BPUE,EPUE,GPUE,LPUE,CPUE) %>%
-#         unlist()
-#       
-#       control.samples.obs[row,col,1:5] <-xdo %>% filter(EXP=="control") %>%
-#         mutate(target=target_depth) %>%
-#         mutate(diff=abs(depth-target_depth)) %>%
-#         filter(diff==min(diff)) %>%
-#         sample_n(1) %>%
-#         select(BPUE,EPUE,GPUE,LPUE,CPUE) %>%
-#         unlist()
-#     } ## close if loop for observer data
-#     #end_time <- Sys.time()
-#     #end_time - start_time
-#   } ## close loop over row of fishing trips
-#   print(sprintf("finished bootstrap %i",row))
-# } ## close loop over bootstrap samples
-# 
-# 
-# 
-# ### SUMMARISE ALL BOOTSTRAP SAMPLES
-# metrics<-c("all birds","common eider","black and common guillemots","long-tailed duck","fish catch")
-# allout<-data.frame()
-# rawout<-data.frame()
-# for(m in 1:length(metrics)) {
-#   LEB.statistics <- apply(LEB.samples[,,m], 1, mean)
-#   RATE_LEB<-data.frame(treatment="with LEB",mean=median(LEB.statistics),
-#                        lcl=quantile(LEB.statistics,0.025),ucl=quantile(LEB.statistics,0.975))
-#   control.statistics <- apply(control.samples[,,m], 1, mean)
-#   RATE_control<-data.frame(treatment="control",mean=median(control.statistics, na.rm=T),
-#                            lcl=quantile(control.statistics,0.025, na.rm=T),ucl=quantile(control.statistics,0.975, na.rm=T))
-#   
-#   ## OUTPUT FOR REPORT
-#   rawout<-bind_rows(RATE_LEB,RATE_control) %>%
-#     mutate(metric=metrics[m]) %>% mutate(obs="all data") %>%
-#     bind_rows(rawout)
-#   
-#   ## summarise for plot
-#   allout<-data.frame(mean=quantile(LEB.statistics-control.statistics,0.5)*2000, lcl=quantile(LEB.statistics-control.statistics,0.025)*2000,ucl=quantile(LEB.statistics-control.statistics,0.975)*2000) %>%
-#     mutate(metric=metrics[m]) %>% mutate(obs="all data") %>%
-#     bind_rows(allout)
-# }
-# 
-# for(m in 1:length(metrics)) {
-#   LEB.statistics <- apply(LEB.samples.obs[,,m], 1, mean)
-#   RATE_LEB<-data.frame(treatment="with LEB",mean=median(LEB.statistics),
-#                        lcl=quantile(LEB.statistics,0.025),ucl=quantile(LEB.statistics,0.975))
-#   control.statistics <- apply(control.samples.obs[,,m], 1, mean)
-#   RATE_control<-data.frame(treatment="control",mean=median(control.statistics, na.rm=T),
-#                            lcl=quantile(control.statistics,0.025, na.rm=T),ucl=quantile(control.statistics,0.975, na.rm=T))
-#   
-#   ## OUTPUT FOR REPORT
-#   rawout<-bind_rows(RATE_LEB,RATE_control) %>%
-#     mutate(metric=metrics[m]) %>% mutate(obs="only observer data") %>%
-#     bind_rows(rawout)
-#   
-#   ## summarise for plot
-#   allout<-data.frame(mean=quantile(LEB.statistics-control.statistics,0.5)*2000, lcl=quantile(LEB.statistics-control.statistics,0.025)*2000,ucl=quantile(LEB.statistics-control.statistics,0.975)*2000) %>%
-#     mutate(metric=metrics[m]) %>% mutate(obs="only observer data") %>%
-#     bind_rows(allout)
-# }
-# 
-# ### SAVE OUTPUT TO CSV
-# ## first convert to mean trossa day
-# rawout<-rawout %>%
-#   mutate(mean=mean*2000,lcl=lcl*2000,ucl=ucl*2000) %>%
-#   select(obs,metric,treatment,mean,lcl,ucl) %>%
-#   arrange(obs,metric,treatment)
-# 
-# allout<-allout %>%
-#   select(obs,metric,mean,lcl,ucl)%>%
-#   arrange(obs,metric)
-# 
-# #fwrite(allout,"Iceland_LEB_bootstrap_differences.csv")
-# #fwrite(rawout,"Iceland_LEB_bootstrap_bycatch_rates.csv")
-# 
-# ### CREATE SUMMARY PLOT OF ALL TARGET GROUPS
-# allout %>% filter(metric != "fish catch") %>%
-#   group_by(obs) %>%
-#   
-#   ggplot(aes(y=mean, x=metric,colour=obs)) + geom_point(size=2, position=position_dodge(width=0.2))+
-#   geom_errorbar(aes(ymin=lcl, ymax=ucl), width=.03, position=position_dodge(width=0.2))+
-#   labs(colour='Data source:') +
-#   scale_y_continuous(limits=c(-0.5,0.5), breaks=seq(-0.5,0.5,0.1)) +
-#   geom_hline(aes(yintercept=0), colour="darkgrey", linetype=2) +
-#   xlab("") +
-#   ylab("Bycatch difference in trossa per day with LEB") +
-#   theme(panel.background=element_rect(fill="white", colour="black"), 
-#         axis.text=element_text(size=16, color="black"), 
-#         axis.title=element_text(size=18), 
-#         strip.text=element_text(size=18, color="black"),
-#         legend.text=element_text(size=14, color="black"),
-#         legend.title=element_text(size=18, color="black"),
-#         legend.key=element_blank(),
-#         legend.position=c(0.2,0.1),
-#         strip.background=element_rect(fill="white", colour="black"), 
-#         panel.grid.major = element_blank(), 
-#         panel.grid.minor = element_blank(), 
-#         panel.border = element_blank())
-# 
-# #ggsave("Iceland_LEB_trial_bycatch_difference.jpg", width=11, height=8)
+# ~~~~~~~~ commented out because it takes 2 hrs to run ~~~~~~~~~~~  ##
+## FORMERLY CALLED APPROACH 2 - calculate difference per fishing trip and then bootstrap over difference
+## because we have multiple control nets per LEB, we have two layers of random sampling
+## we ensure that a sample is taken from each fishing trip by looping over trips
+# abandoned on 27 June as it is incredibly slow
+# resurrected on 11 July 2022 to include the depth matching of LEB and control nets
+# no longer calculates difference per fishing trip, but matches sampling from same trips
+# because of very long loop, calculate all matrices in the same loop
+
+bootstraps<-10000
+# one execution takes 0.06983399 sec, so calculate length of duration as
+(round(0.06983399,2) * bootstraps * nrow(LEBs))/3600  ## in hours
+
+boot.samples <- matrix(sample(LEBs$fishing_trip_id, size = bootstraps * nrow(LEBs), replace = TRUE),bootstraps, nrow(LEBs))
+LEB.samples <- array(NA,dim=c(bootstraps, nrow(LEBs),6),dimnames=list(NULL,NULL,c("BPUE","EPUE","GPUE","LPUE","CPUE","MPUE")))
+control.samples <- array(NA,dim=c(bootstraps, nrow(LEBs),6),dimnames=list(NULL,NULL,c("BPUE","EPUE","GPUE","LPUE","CPUE","MPUE")))
+
+boot.samples.obs <- matrix(sample(LEBs$fishing_trip_id[LEBs$observer==1], size = bootstraps * nrow(LEBs), replace = TRUE),bootstraps, nrow(LEBs[LEBs$observer==1,]))
+LEB.samples.obs <- array(NA,dim=c(bootstraps, nrow(LEBs[LEBs$observer==1,]),6),dimnames=list(NULL,NULL,c("BPUE","EPUE","GPUE","LPUE","CPUE","MPUE")))
+control.samples.obs <- array(NA,dim=c(bootstraps, nrow(LEBs[LEBs$observer==1,]),6),dimnames=list(NULL,NULL,c("BPUE","EPUE","GPUE","LPUE","CPUE","MPUE")))
+
+for(row in 1:bootstraps){
+  for (col in 1:nrow(LEBs)){
+    #start_time <- Sys.time()
+    xd<- data %>% filter(fishing_trip_id==boot.samples[row,col])
+    mean_depth<-mean(xd$depth[xd$EXP=="LEB"])  ## take mean for the odd trip with 2 LEBs
+    target_depth<-rnorm(1,mean_depth,5)
+    LEB.samples[row,col,1:6] <- xd %>% filter(EXP=="LEB") %>%
+      sample_n(1) %>%
+      select(BPUE,EPUE,GPUE,LPUE,CPUE,MPUE) %>%
+      unlist()
+
+    control.samples[row,col,1:6] <-xd %>% filter(EXP=="control") %>%
+                                        mutate(target=target_depth) %>%
+                                        mutate(diff=abs(depth-target_depth)) %>%
+                                        filter(diff==min(diff)) %>%
+                                        sample_n(1) %>%
+                                        select(BPUE,EPUE,GPUE,LPUE,CPUE,MPUE) %>%
+                                        unlist()
+
+    ### use only observer data ###
+    if(col <= nrow(LEBs[LEBs$observer==1,])){
+      xdo<- data %>% filter(fishing_trip_id==boot.samples.obs[row,col])
+      mean_depth<-mean(xdo$depth[xdo$EXP=="LEB"])  ## take mean for the odd trip with 2 LEBs
+      target_depth<-rnorm(1,mean_depth,5)
+      LEB.samples.obs[row,col,1:6] <- xdo %>% filter(EXP=="LEB") %>%
+        sample_n(1) %>%
+        select(BPUE,EPUE,GPUE,LPUE,CPUE,MPUE) %>%
+        unlist()
+
+      control.samples.obs[row,col,1:6] <-xdo %>% filter(EXP=="control") %>%
+        mutate(target=target_depth) %>%
+        mutate(diff=abs(depth-target_depth)) %>%
+        filter(diff==min(diff)) %>%
+        sample_n(1) %>%
+        select(BPUE,EPUE,GPUE,LPUE,CPUE,MPUE) %>%
+        unlist()
+    } ## close if loop for observer data
+    #end_time <- Sys.time()
+    #end_time - start_time
+  } ## close loop over row of fishing trips
+  print(sprintf("finished bootstrap %i",row))
+} ## close loop over bootstrap samples
 
 
+
+### SUMMARISE ALL BOOTSTRAP SAMPLES
+metrics<-c("all birds","common eider","black and common guillemots","long-tailed duck","fish catch","mammals")
+allout<-data.frame()
+rawout<-data.frame()
+for(m in 1:length(metrics)) {
+  LEB.statistics <- apply(LEB.samples[,,m], 1, mean)
+  RATE_LEB<-data.frame(treatment="with LEB",mean=median(LEB.statistics),
+                       lcl=quantile(LEB.statistics,0.025),ucl=quantile(LEB.statistics,0.975))
+  control.statistics <- apply(control.samples[,,m], 1, mean)
+  RATE_control<-data.frame(treatment="control",mean=median(control.statistics, na.rm=T),
+                           lcl=quantile(control.statistics,0.025, na.rm=T),ucl=quantile(control.statistics,0.975, na.rm=T))
+
+  ## OUTPUT FOR REPORT
+  rawout<-bind_rows(RATE_LEB,RATE_control) %>%
+    mutate(metric=metrics[m]) %>% mutate(obs="all data") %>%
+    bind_rows(rawout)
+
+  ## summarise for plot
+  allout<-data.frame(mean=quantile(LEB.statistics-control.statistics,0.5)*2000, lcl=quantile(LEB.statistics-control.statistics,0.025)*2000,ucl=quantile(LEB.statistics-control.statistics,0.975)*2000) %>%
+    mutate(metric=metrics[m]) %>% mutate(obs="all data") %>%
+    bind_rows(allout)
+}
+
+for(m in 1:length(metrics)) {
+  LEB.statistics <- apply(LEB.samples.obs[,,m], 1, mean)
+  RATE_LEB<-data.frame(treatment="with LEB",mean=median(LEB.statistics),
+                       lcl=quantile(LEB.statistics,0.025),ucl=quantile(LEB.statistics,0.975))
+  control.statistics <- apply(control.samples.obs[,,m], 1, mean)
+  RATE_control<-data.frame(treatment="control",mean=median(control.statistics, na.rm=T),
+                           lcl=quantile(control.statistics,0.025, na.rm=T),ucl=quantile(control.statistics,0.975, na.rm=T))
+
+  ## OUTPUT FOR REPORT
+  rawout<-bind_rows(RATE_LEB,RATE_control) %>%
+    mutate(metric=metrics[m]) %>% mutate(obs="only observer data") %>%
+    bind_rows(rawout)
+
+  ## summarise for plot
+  allout<-data.frame(mean=quantile(LEB.statistics-control.statistics,0.5)*2000, lcl=quantile(LEB.statistics-control.statistics,0.025)*2000,ucl=quantile(LEB.statistics-control.statistics,0.975)*2000) %>%
+    mutate(metric=metrics[m]) %>% mutate(obs="only observer data") %>%
+    bind_rows(allout)
+}
+
+### SAVE OUTPUT TO CSV
+## first convert to mean trossa day
+rawout<-rawout %>%
+  mutate(mean=mean*2000,lcl=lcl*2000,ucl=ucl*2000) %>%
+  select(obs,metric,treatment,mean,lcl,ucl) %>%
+  arrange(obs,metric,treatment)
+
+allout<-allout %>%
+  select(obs,metric,mean,lcl,ucl)%>%
+  arrange(obs,metric)
+
+fwrite(allout,"Iceland_LEB_bootstrap_differences.csv")
+fwrite(rawout,"Iceland_LEB_bootstrap_bycatch_rates.csv")
+############################### RESTART #############################################################
+#allout<-fread("Iceland_LEB_bootstrap_differences.csv")
+#rawout<-fread("Iceland_LEB_bootstrap_bycatch_rates.csv")
+
+### CREATE SUMMARY PLOT OF ALL TARGET GROUPS
+allout %>% filter(metric != "fish catch") %>%
+  group_by(obs) %>%
+
+  ggplot(aes(y=mean, x=metric,colour=obs)) + geom_point(size=2, position=position_dodge(width=0.2))+
+  geom_errorbar(aes(ymin=lcl, ymax=ucl), width=.03, position=position_dodge(width=0.2))+
+  labs(colour='Data source:') +
+  scale_y_continuous(limits=c(-0.5,0.5), breaks=seq(-0.5,0.5,0.1)) +
+  geom_hline(aes(yintercept=0), colour="darkgrey", linetype=2) +
+  xlab("") +
+  ylab("Bycatch difference in trossa per day with LEB") +
+  theme(panel.background=element_rect(fill="white", colour="black"),
+        axis.text=element_text(size=16, color="black"),
+        axis.title=element_text(size=18),
+        strip.text=element_text(size=18, color="black"),
+        legend.text=element_text(size=14, color="black"),
+        legend.title=element_text(size=18, color="black"),
+        legend.key=element_blank(),
+        legend.position=c(0.2,0.1),
+        strip.background=element_rect(fill="white", colour="black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank())
+
+# ggsave("C:\\STEFFEN\\MANUSCRIPTS\\in_prep\\Iceland_Lumpfish\\Fig_1.jpg", width=8, height=9, dpi=1000)
+# ggsave("C:\\Users\\steffenoppel\\OneDrive - THE ROYAL SOCIETY FOR THE PROTECTION OF BIRDS\\STEFFEN\\MANUSCRIPTS\\in_prep\\Iceland_Lumpfish\\Fig_1.jpg", width=8, height=9, dpi=1000)
+# ggsave("C:\\STEFFEN\\OneDrive - THE ROYAL SOCIETY FOR THE PROTECTION OF BIRDS\\STEFFEN\\MANUSCRIPTS\\in_prep\\Iceland_Lumpfish\\Fig3.jpg", width=11, height=8, dpi=1000)
+
+
+#### CREATE TABLE 2 FOR MANUSCRIPT
+
+TABLE2<-rawout %>% filter(obs=="all data") %>%
+  mutate(value=paste(round(mean,2)," (",round(lcl,2), " - ",round(ucl,2),")", sep="")) %>%
+  select(-obs,-mean,-lcl,-ucl) %>%
+  spread(key=treatment, value=value)
+
+TABLE2<-allout %>% filter(obs=="all data") %>%
+  mutate(difference=paste(round(mean,2)," (",round(lcl,2), " - ",round(ucl,2),")", sep="")) %>%
+  select(-obs,-mean,-lcl,-ucl) %>%
+  left_join(TABLE2, by="metric") %>%
+  select(metric,`with LEB`,control,difference)
+
+#fwrite(TABLE2,"C:\\Users\\steffenoppel\\OneDrive - THE ROYAL SOCIETY FOR THE PROTECTION OF BIRDS\\STEFFEN\\MANUSCRIPTS\\in_prep\\Iceland_Lumpfish\\TABLE2.csv")
+#fwrite(TABLE2,"C:\\STEFFEN\\OneDrive - THE ROYAL SOCIETY FOR THE PROTECTION OF BIRDS\\STEFFEN\\MANUSCRIPTS\\in_prep\\Iceland_Lumpfish\\TABLE2.csv")
 
 
 #####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
@@ -475,6 +594,16 @@ ggplot(IMP, aes(x=variable, y=IMP)) +
   ylab("Variable importance (%)") +
   xlab("Explanatory variable") +
   scale_y_continuous(limits=c(-20,115), breaks=seq(0,100,20), labels=seq(0,100,20))+
+  scale_x_discrete(name="",limit = c("EXP","jday","trossa_area","observer","fishing_trip_id","soaking_nights","dist_coast","depth"),
+                   labels = c("LEB present",
+                              "Day of the year",
+                              "Area of trossa",                              
+                              "Observer",
+                              "Fishing trip",
+                              "Duration",
+                              "Distance to coast",
+                              "Depth"))  +
+  
   theme(panel.background=element_rect(fill="white", colour="black"), 
         axis.text.x=element_text(size=18, color="black"),
         #axis.text.y=element_blank(), 
@@ -484,7 +613,436 @@ ggplot(IMP, aes(x=variable, y=IMP)) +
         panel.grid.major = element_blank(), 
         panel.grid.minor = element_blank(), 
         panel.border = element_blank())
-#ggsave("LEB_Iceland_variable_importance.jpg", width=10, height=8)
+
+
+# ggsave("C:\\STEFFEN\\MANUSCRIPTS\\in_prep\\Iceland_Lumpfish\\Fig_S1.jpg", width=9, height=9, dpi=1000)
+# ggsave("C:\\Users\\steffenoppel\\OneDrive - THE ROYAL SOCIETY FOR THE PROTECTION OF BIRDS\\STEFFEN\\MANUSCRIPTS\\in_prep\\Iceland_Lumpfish\\Fig_S1.jpg", width=9, height=9, dpi=1000)
+# ggsave("C:\\STEFFEN\\OneDrive - THE ROYAL SOCIETY FOR THE PROTECTION OF BIRDS\\STEFFEN\\MANUSCRIPTS\\in_prep\\Iceland_Lumpfish\\Fig_S1.jpg", width=9, height=9, dpi=1000)
+
+
+
+
+#####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
+#####
+#####    QUANTIFY DEPTH AT WHICH SPECIES ARE CAUGHT ###   ~~~~~~~~~~~~~~~~~~~~~~~~~~########
+#####
+#####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
+names(sets)
+depthcaptures<-sets[,c(17,18,21:35)] %>% 
+  mutate(depth=((min_depth_fathoms+max_depth_fathoms)/2)*1.8288) %>% ## convert depth to metres
+  mutate(depth=ifelse(is.na(depth),7*1.8288,depth)) %>% ## fill in one missing value
+  dplyr::select(-min_depth_fathoms,-max_depth_fathoms) %>%
+  gather(key="Species", value="Catch",-depth) %>%
+  mutate(Catch=ifelse(is.na(Catch),0,Catch)) %>%
+  filter(Catch>0)
+
+alldepthcaptures <- data.frame()
+for(x in 1:dim(depthcaptures)[1]){
+  l<-depthcaptures[x,]
+  out_l<-data.frame(Species=l$Species,depth=l$depth,Catch=rep(1,l$Catch))
+  alldepthcaptures <- bind_rows(alldepthcaptures, out_l)
+}
+dim(depthcaptures)
+dim(alldepthcaptures)
+
+depthmeans<-alldepthcaptures %>% group_by(Species) %>%
+  summarise(depth=mean(depth)) %>%
+  arrange(depth) %>%
+  mutate(Species=str_replace(Species,"_"," "))
+
+alldepthcaptures %>%
+  left_join(totals, by="Species") %>%
+  filter(N>2) %>%
+  mutate(Species=str_replace(Species,"_"," ")) %>%
+  mutate(Species=as.factor(Species)) %>%
+  mutate(Species=factor(Species, levels=depthmeans$Species)) %>%
+
+  ggplot(aes(y=depth, x=Species)) +
+  geom_boxplot() +
+  coord_flip() +
+  ylab("Mean catch depth (m)") +
+  geom_text(aes(x=Species, y=0, label = paste0("(n = ", N, ")")), nudge_y = -0.25) + 
+  theme(panel.background=element_rect(fill="white", colour="black"), 
+        axis.text=element_text(size=18, color="black"),
+        axis.title=element_text(size=20), 
+        strip.text.x=element_text(size=18, color="black"), 
+        strip.background=element_rect(fill="white", colour="black"), 
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.border = element_blank())
+
+#ggsave("LEB_Iceland_mean_catch_depth.jpg", width=10, height=8)
+# ggsave("C:\\Users\\steffenoppel\\OneDrive - THE ROYAL SOCIETY FOR THE PROTECTION OF BIRDS\\STEFFEN\\MANUSCRIPTS\\in_prep\\Iceland_Lumpfish\\Fig_4.jpg", width=10, height=8, dpi=1000)
+# ggsave("C:\\STEFFEN\\OneDrive - THE ROYAL SOCIETY FOR THE PROTECTION OF BIRDS\\STEFFEN\\MANUSCRIPTS\\in_prep\\Iceland_Lumpfish\\Fig_4.jpg", width=10, height=8, dpi=1000)
+
+
+
+### QUANTIFY HOW MANY BLACK GUILLEMOTS COULD BE SAVED
+alldepthcaptures %>%
+  left_join(totals, by="Species") %>%
+  filter(Species=="black_guillemot") %>%
+  mutate(depth=ifelse(depth<10,0,ifelse(depth<20,10,ifelse(depth<30,20,ifelse(depth<40,30,ifelse(depth<50,40,50)))))) %>%
+  group_by(Species,depth,N) %>%
+  summarise(tot=sum(Catch)) %>%
+  mutate(prop=tot/N)
+
+
+
+#####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
+#####
+#####    QUANTIFY CHANGE IN BYCATCH UNDER MANAGEMENT SCENARIOS  ~~~~~~~~########
+#####
+#####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
+
+## added on 24 Oct 2022
+# I think the data "distance from coast" are a bit challenging to work around, since most fishing occurs within fjords. A 5 km net ban from shore could literally mean a fishery closure. 
+# Thus depth-based restriction might be more manageable with the local conditions in my opinion
+# 
+# What would be the seabird bycatch % reduction if a 40 m set depth limit is implemented, compared to the currently observed bycatch levels?
+# And in the case of a 10m, 20m, or 30m limit?
+
+# We know that a total of 174 boats actively participated in the Icelandic lumpfish fishery the previous season (2021)
+# Annually, over 8,000 seabirds are bycaught in this fishery (Christensen-Dalsgaard et al. 2019).
+
+# In 2021, each boat had a 40 days long fishing season (max consecutive fishing days allowed, starting from first fishing day).
+# In 2022, the season was only 25 days.
+# 
+# Each boat is allowed to deploy a total of 7500 meters of nets and to leave them unattended for a maximum of 3 days under the current regulation (165/2020).
+# Gillnets are generally being deployed between 5-50 meters deep (MFRI 2022). 
+# 
+# In this report from 2014-2017, from which the 8,000 bycatch figure is extracted, we have calculated the depth and temporal distribution of fishing effort.
+# There is also a bycatch rate shown, but CPUE is per trip.
+
+
+## APPROACH:
+# estimate bycatch rate per depth category
+# estimate fish catch rate per depth category
+# use landings data per depth category to estimate proportion of national fishing effort per depth category
+# extrapolate current country-wide bycatch number (hoping it will be close to the ~8000)
+# simulate redistribution of fishing effort from <40 m to deeper depths and re-calculate bycatch and fish catch
+# this ignores potential availability of water at that depth with sufficient fish ressource
+
+## added sample distribution of fishing effort at depth levels for our empirical data (1 Feb 2023)
+
+
+## FIRST COMPILE THE DATA WITH THE DEPTH INFO FOR EACH TROSSA
+
+head(data)
+names(sets)
+depthdata<-data %>% left_join(sets[,c(2,8,17,18)], by=c("fishing_trip_id","trossa_id")) %>% 
+  mutate(depth=((min_depth_fathoms+max_depth_fathoms)/2)*1.8288) %>% ## convert depth to metres
+  mutate(depth=ifelse(is.na(depth),7*1.8288,depth)) %>% ## fill in one missing value
+  dplyr::select(-min_depth_fathoms,-max_depth_fathoms) %>%
+  mutate(Month=month(start))
+
+
+
+## landings data
+depthlandings<-data.frame(depth=c(0,10,20,30,40,50),landings=c(0.13,0.34,0.18,0.13,0.1,0.12))
+seasonlandings<-data.frame(month=c(3,4,5,6,7,8),landings=c(0.07,0.45,0.30,0.12,0.05,0.01))
+landings<-data.frame(year=seq(2014,2021),tons=c(4074,6474,5504,4565,4516,5044,5315,7601))
+
+## catch and bycatch per depth category
+depthrates<-depthdata  %>% ungroup() %>%
+  mutate(depth=ifelse(depth<10,0,ifelse(depth<20,10,ifelse(depth<30,20,ifelse(depth<40,30,ifelse(depth<50,40,50)))))) %>%
+  dplyr::select(depth, CPUE, BPUE, MPUE) %>%
+  gather(key="type",value="catch",-depth) %>%
+  mutate(type=ifelse(type=="CPUE","fish",ifelse(type=="MPUE","mammals","birds"))) %>% #filter(water==20 & type=="birds" & catch>0) %>% ggplot() + geom_histogram(aes(x=catch))
+  group_by(type,depth) %>%
+  summarise(mean=mean(catch),lcl=stats::quantile(catch,0.025),ucl=stats::quantile(catch,0.975))
+
+depthrates_table<-depthrates %>%
+  mutate(mean=mean*2000) %>%
+  select(-lcl,-ucl) %>%
+  spread(key=type, value=mean)
+  
+# fwrite(depthrates_table,"C:\\Users\\steffenoppel\\OneDrive - THE ROYAL SOCIETY FOR THE PROTECTION OF BIRDS\\STEFFEN\\MANUSCRIPTS\\in_prep\\Iceland_Lumpfish\\TABLE3b.csv")
+# fwrite(depthrates_table,"C:\\STEFFEN\\OneDrive - THE ROYAL SOCIETY FOR THE PROTECTION OF BIRDS\\STEFFEN\\MANUSCRIPTS\\in_prep\\Iceland_Lumpfish\\TABLE3b.csv")
+
+
+## proportion of bycatch per depth category
+depthprops<-depthdata  %>% ungroup() %>%
+  mutate(depth=ifelse(depth<10,0,ifelse(depth<20,10,ifelse(depth<30,20,ifelse(depth<40,30,ifelse(depth<50,40,50)))))) %>%
+  mutate(mammals=MPUE*effort) %>%
+  dplyr::select(depth, birds_per_trossa, mammals) %>%
+  gather(key="type",value="catch",-depth) %>%
+  group_by(type,depth) %>%
+  summarise(bycatch=sum(catch)) %>%
+  mutate(prop_bycatch=bycatch/sum(bycatch))
+
+
+# fwrite(depthprops,"C:\\Users\\steffenoppel\\OneDrive - THE ROYAL SOCIETY FOR THE PROTECTION OF BIRDS\\STEFFEN\\MANUSCRIPTS\\in_prep\\Iceland_Lumpfish\\TABLE3c.csv")
+# fwrite(depthprops,"C:\\STEFFEN\\OneDrive - THE ROYAL SOCIETY FOR THE PROTECTION OF BIRDS\\STEFFEN\\MANUSCRIPTS\\in_prep\\Iceland_Lumpfish\\TABLE3c.csv")
+
+
+
+
+
+## apportion the tons of fish to depth categories in each year to calculate effort
+deptheffort<-bind_rows(landings,landings,landings,landings,landings,landings) %>%
+  mutate(depth=rep(depthlandings$depth,each=length(landings$year)), prop=rep(depthlandings$landings,each=length(landings$year))) %>%
+  mutate(depthcatch=prop*tons) %>%
+  arrange(year,depth) %>%
+  left_join(depthrates %>% filter(type=="fish"), by="depth") %>%
+  mutate(effort=(depthcatch/0.003)/mean, effort.lcl=(depthcatch/0.003)/ucl,effort.ucl=(depthcatch/0.003)/lcl) %>%  ## assuming that one fish weighs 3 kg or 0.003 tons
+  mutate(effort.ucl=ifelse(is.infinite(effort.ucl),effort*2,effort.ucl))   ### assume that max effort is twice of median effort 
+
+deptheffort_SAMPLE<-depthdata  %>% ungroup() %>%
+  mutate(depth=ifelse(depth<10,0,ifelse(depth<20,10,ifelse(depth<30,20,ifelse(depth<40,30,ifelse(depth<50,40,50)))))) %>%
+  dplyr::select(depth, effort) %>%
+  group_by(depth) %>%
+  summarise(tot_eff=sum(effort)) %>%
+  mutate(prop=tot_eff/sum(tot_eff))
+
+# fwrite(deptheffort_SAMPLE,"C:\\Users\\steffenoppel\\OneDrive - THE ROYAL SOCIETY FOR THE PROTECTION OF BIRDS\\STEFFEN\\MANUSCRIPTS\\in_prep\\Iceland_Lumpfish\\TABLE3a.csv")
+# fwrite(deptheffort_SAMPLE,"C:\\STEFFEN\\OneDrive - THE ROYAL SOCIETY FOR THE PROTECTION OF BIRDS\\STEFFEN\\MANUSCRIPTS\\in_prep\\Iceland_Lumpfish\\TABLE3a.csv")
+
+
+## extrapolate the estimated effort at depth categories to bycatch rates to estimate total bycatch per depth
+depthbycatch<-deptheffort %>%
+  select(year, tons,depth, depthcatch,effort,effort.lcl,effort.ucl) %>%
+  left_join(depthrates %>% filter(type=="birds"), by="depth") %>%
+  mutate(birds=mean*effort, birds.ucl=mean*effort.ucl, birds.lcl=mean*effort.lcl) %>%     ### you can calculate that with either fish effort CIs or bird catch rate CIs
+  select(year, tons,depth, depthcatch,effort,effort.lcl,effort.ucl, birds, birds.lcl,birds.ucl) %>%
+  left_join(depthrates %>% filter(type=="mammals"), by="depth") %>%
+  mutate(mammals=mean*effort, mammals.ucl=mean*effort.ucl, mammals.lcl=mean*effort.lcl) %>%
+  select(year, tons,depth, depthcatch,birds, birds.ucl, mammals,mammals.lcl, mammals.ucl)
+
+BYCATCH_TOTAL_BASELINE<-depthbycatch %>% group_by(year) %>%
+  summarise(fish=sum(depthcatch),birds=sum(birds),birds.ucl=sum(birds.ucl), mammals=sum(mammals),mammals.ucl=sum(mammals.ucl))
+#fwrite(BYCATCH_TOTAL_BASELINE,"C:\\STEFFEN\\OneDrive - THE ROYAL SOCIETY FOR THE PROTECTION OF BIRDS\\STEFFEN\\MANUSCRIPTS\\in_prep\\Iceland_Lumpfish\\Iceland_total_bycatch_per_year.csv")
+
+### for text
+summary(BYCATCH_TOTAL_BASELINE)
+#fwrite(depthbycatch,"Iceland_total_bycatch_per_depth.csv")
+
+
+
+
+### summary for report
+summary(BYCATCH_TOTAL_BASELINE)
+BYCATCH_TOTAL_BASELINE %>% summarise(mean=median(birds), ucl=median(birds.ucl))
+  
+
+
+### summaries for text
+range(deptheffort$effort/2000)
+deptheffort %>% group_by(depth) %>% summarise(avg=mean(depthcatch))
+
+DEPTH_CATCH_BASELINE<-depthbycatch %>% group_by(depth) %>%
+  summarise(fish=mean(depthcatch),birds=mean(birds),birds.ucl=mean(birds.ucl), mammals=mean(mammals),mammals.ucl=mean(mammals.ucl))
+
+# fwrite(DEPTH_CATCH_BASELINE,"C:\\Users\\steffenoppel\\OneDrive - THE ROYAL SOCIETY FOR THE PROTECTION OF BIRDS\\STEFFEN\\MANUSCRIPTS\\in_prep\\Iceland_Lumpfish\\TABLE3d.csv")
+# fwrite(DEPTH_CATCH_BASELINE,"C:\\STEFFEN\\OneDrive - THE ROYAL SOCIETY FOR THE PROTECTION OF BIRDS\\STEFFEN\\MANUSCRIPTS\\in_prep\\Iceland_Lumpfish\\TABLE3d.csv")
+
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#####  SIMULATE FISHING CLOSURE AT CERTAIN DEPTH AND REALLOCATION OF EFFORT TO DEEPER WATER ###########
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+
+## assume fishing closed in waters <40m depth
+## all fishing effort would go into water >40 m depth
+
+closure_depth_simulation<-data.frame()
+
+for(d in c(10, 20, 30, 40, 50)) {
+  for (y in unique(BYCATCH_TOTAL_BASELINE$year)) {
+    yeff <- deptheffort %>% filter(year == y) %>%
+      mutate(IN = if_else(depth >= d, 1, 0))
+    
+    ### summarise effort in closed waters and redistribute to open waters
+    mean.eff.add <-
+      sum(yeff$effort[yeff$IN == 0]) / length(yeff$effort[yeff$IN == 1])
+    max.eff.add <-
+      sum(yeff$effort.ucl[yeff$IN == 0]) / length(yeff$effort[yeff$IN == 1])
+    
+    out <- yeff %>% filter(IN == 1) %>%
+      mutate(effort = effort + mean.eff.add,
+             effort.ucl = effort.ucl + max.eff.add) %>%
+      mutate(depthcatch = mean * effort * 0.003) %>%    ### calculating fish catch when effort moved to deeper water
+      select(year, tons, depth, depthcatch, effort, effort.ucl) %>%
+      left_join(depthrates %>% filter(type == "birds"), by = "depth") %>%
+      # mutate(bycatch = mean * effort,
+      #        bycatch.ucl = ucl * effort.ucl)  %>%
+      mutate(birds=mean*effort, birds.ucl=ucl*effort.ucl) %>%
+      select(year, tons, depth, depthcatch, effort, effort.ucl, birds, birds.ucl) %>%
+      left_join(depthrates %>% filter(type=="mammals"), by="depth") %>%
+      mutate(mammals=mean*effort, mammals.ucl=ucl*effort.ucl) %>%
+      select(year, tons,depthcatch,birds, birds.ucl, mammals, mammals.ucl) %>%
+      
+      group_by(year, tons) %>%
+      summarise(
+        fish = sum(depthcatch),
+        birds = sum(birds),
+        birds.ucl = sum(birds.ucl),
+        mammals = sum(mammals),
+        mammals.ucl = sum(mammals.ucl)
+      ) %>%
+      mutate(closure_depth = d)
+    
+    closure_depth_simulation <- bind_rows(closure_depth_simulation, out)
+  }
+}
+
+
+
+#### CREATING TABLE 4
+TABLE4 <- closure_depth_simulation %>% group_by(closure_depth) %>%
+  summarise(mean.fish=mean(fish), min.fish=min(fish), max.fish=max(fish),
+            mean.birds=mean(birds), min.birds=min(birds), max.birds=max(birds),
+            mean.mammals=mean(mammals),min.mammals=min(mammals),max.mammals=max(mammals)) %>%
+  mutate(Fish=paste(round(mean.fish,0)," (",round(min.fish,0), " - ",round(max.fish,0),")", sep="")) %>%
+  mutate(Birds=paste(round(mean.birds,0)," (",round(min.birds,0), " - ",round(max.birds,0),")", sep="")) %>%
+  mutate(Mammals=paste(round(mean.mammals,0)," (",round(min.mammals,0), " - ",round(max.mammals,0),")", sep="")) %>%
+  select(closure_depth,Fish,Birds,Mammals)
+
+#fwrite(TABLE4,"C:\\Users\\steffenoppel\\OneDrive - THE ROYAL SOCIETY FOR THE PROTECTION OF BIRDS\\STEFFEN\\MANUSCRIPTS\\in_prep\\Iceland_Lumpfish\\TABLE4.csv")
+fwrite(TABLE4,"C:\\STEFFEN\\OneDrive - THE ROYAL SOCIETY FOR THE PROTECTION OF BIRDS\\STEFFEN\\MANUSCRIPTS\\in_prep\\Iceland_Lumpfish\\TABLE4.csv")
+
+
+
+
+#### CALCULATING RELATIVE CHANGE IN FISH CATCH AND CHANGE IN BIRD BYCATCH
+
+closure_depth_simulation %>% left_join(BYCATCH_TOTAL_BASELINE, by="year") %>%
+  mutate(lumpfish=((fish.x-fish.y)/fish.y)*100,
+         seabirds=((birds.x-birds.y)/birds.y)*100,
+         mammals=((mammals.x-mammals.y)/mammals.y)*100,
+         bird_max_change=((birds.ucl.x-birds.ucl.y)/birds.ucl.y)*100,
+         mammal_max_change=((mammals.ucl.x-mammals.ucl.y)/mammals.ucl.y)*100) %>%
+  select(year,closure_depth,lumpfish,seabirds, mammals) %>%
+  gather(key="Species",value="change",-year,-closure_depth) %>%
+  mutate(Species=ifelse(Species=="seabirds","bird bycatch",ifelse(Species=="mammals","mammal bycatch","target lumpfish catch"))) %>%
+  rename(Category=Species) %>%
+  filter(year==2021) %>%   ## all years have the same proportional change in reduction
+  
+  ggplot() +
+  geom_bar(aes(y = change, x = closure_depth, fill = Category), stat="identity",position="dodge")+
+  geom_hline(aes(yintercept=0), linetype="dashed", size=1)+
+  ylab("Change in total catch per year (in %)") +
+  xlab("Closure depth for fishing (m)") +
+  theme(panel.background=element_rect(fill="white", colour="black"), 
+        axis.text=element_text(size=16, color="black"), 
+        axis.title=element_text(size=18),
+        legend.text=element_text(size=16, color="black"),
+        legend.title=element_text(size=18, color="black"),
+        legend.position=c(0.15,0.1),
+        strip.background=element_rect(fill="white", colour="black"), 
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.border = element_blank())
+
+# ggsave("Iceland_bycatch_reduction_depth_closure.jpg", width=12, height=8)
+# ggsave("C:\\Users\\steffenoppel\\OneDrive - THE ROYAL SOCIETY FOR THE PROTECTION OF BIRDS\\STEFFEN\\MANUSCRIPTS\\in_prep\\Iceland_Lumpfish\\Fig_5.jpg", width=10, height=8, dpi=1000)
+# ggsave("C:\\STEFFEN\\OneDrive - THE ROYAL SOCIETY FOR THE PROTECTION OF BIRDS\\STEFFEN\\MANUSCRIPTS\\in_prep\\Iceland_Lumpfish\\Fig_5.jpg", width=10, height=8, dpi=1000)
+
+
+
+
+#### CREATE SUMMARY TABLE OF ABSOLUTE REDUCTION PER YEAR
+SUMMARY<-closure_depth_simulation %>% left_join(BYCATCH_TOTAL_BASELINE, by="year") %>%
+  mutate(REDUCTION_birds=as.integer(birds.x-birds.y),
+         REDUCTION_birds_max=as.integer(birds.ucl.x-birds.ucl.y)) %>%
+  rename(extrapol_bycatch=birds.y,extrapol_bycatch_max=birds.ucl.y) %>%
+  rename(reduced_bycatch=birds.x,reduced_bycatch_max=birds.ucl.x) %>%
+  mutate(Baseline_bycatch=paste(as.integer(extrapol_bycatch),as.integer(extrapol_bycatch_max),sep=" - ")) %>%
+  mutate(Reduced_bycatch=paste(as.integer(reduced_bycatch),as.integer(reduced_bycatch_max),sep=" - ")) %>%
+  mutate(Reduction=paste(abs(REDUCTION_birds),abs(REDUCTION_birds_max),sep=" - ")) %>%
+  select(year,closure_depth,Baseline_bycatch,Reduced_bycatch,Reduction)
+
+fwrite(SUMMARY,"Iceland_simulated_absolute_bycatch_reduction_by_year_depth.csv")
+
+
+#### CREATE LESS DETAILED SUMMARY TABLE OF ABSOLUTE REDUCTION PER YEAR
+SUMMARY2<-closure_depth_simulation %>% left_join(BYCATCH_TOTAL_BASELINE, by="year") %>%
+  mutate(REDUCTION_birds=as.integer(birds.x-birds.y),
+         REDUCTION_birds_max=as.integer(birds.ucl.x-birds.ucl.y)) %>%
+  group_by(closure_depth) %>%
+  summarise(REDUCTION=mean(REDUCTION_birds), MAX_REDUCTION=max(REDUCTION_birds_max))
+
+fwrite(SUMMARY2,"Iceland_simulated_absolute_bycatch_reduction_by_depth.csv")
+
+
+
+#### BREAKING IT UP BY SPECIES FOR EXTRAPOLATION ###
+totals<-totals %>% mutate(prop=N/sum(totals$N))
+SPECSUMMARY<-expand.grid(Species=totals$Species,closure_depth=SUMMARY2$closure_depth) %>%
+  left_join(totals, by="Species") %>%
+  left_join(SUMMARY2,by="closure_depth") %>%
+  mutate(REDUCTION_birds=REDUCTION*prop,
+         REDUCTION_birds_max=MAX_REDUCTION*prop) %>%
+  select(Species, closure_depth,REDUCTION_birds,REDUCTION_birds_max)
+
+fwrite(SPECSUMMARY,"Iceland_simulated_species_bycatch_reduction_by_depth.csv")
+getwd()
+
+
+
+
+
+
+#####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
+#####
+#####    EXTRAPOLATION BASED ON FISHING TRIPS  ~~~~~~~~########
+#####
+#####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
+## DOES NOT CONSIDER EFFORT, BUT SUMMARISES BYCATCH PER FISHING TRIP FOR EXTRAPOLATION
+head(sets)
+
+### summarise bycatch per fishing trip
+trip_data<-sets %>%
+  mutate(start=ymd_hm(paste(departure_date,departure_time))) %>%
+  mutate(birds_per_trossa=ifelse(is.na(birds_per_trossa),0,birds_per_trossa)) %>%
+  mutate(lumpfish_per_trossa=ifelse(is.na(lumpfish_per_trossa),0,lumpfish_per_trossa)) %>%
+  mutate(harbour_seal=ifelse(is.na(harbour_seal),0,harbour_seal)) %>%
+  mutate(grey_seal=ifelse(is.na(grey_seal),0,grey_seal)) %>%
+  mutate(harp_seal=ifelse(is.na(harp_seal),0,harp_seal)) %>%
+  mutate(white_beaked_dolphin=ifelse(is.na(white_beaked_dolphin),0,white_beaked_dolphin)) %>%
+  mutate(bottlenose_dolphin=ifelse(is.na(bottlenose_dolphin),0,bottlenose_dolphin)) %>%
+  mutate(harbour_porpoise=ifelse(is.na(harbour_porpoise),0,harbour_porpoise)) %>%
+  mutate(observer=ifelse(biopol_onboard %in% c("herdis","halldor"),1,0)) %>%
+  mutate(depth=((min_depth_fathoms+max_depth_fathoms)/2)*1.8288) %>% ## convert depth to metres
+  mutate(depth=ifelse(is.na(depth),7*1.8288,depth)) %>% ## fill in one missing value
+  group_by(boat,fishing_trip_id,start,observer) %>%
+  summarise(fish=sum(lumpfish_per_trossa),birds=sum(birds_per_trossa),mammals=sum(harbour_seal+grey_seal+harp_seal+white_beaked_dolphin+bottlenose_dolphin+harbour_porpoise), depth=mean(depth))
+head(trip_data)
+
+### mean catch rates per fishing trip
+summary(trip_data)
+mean(trip_data$fish)
+mean(trip_data$birds)
+mean(trip_data$mammals)
+
+
+## NUMBER OF FISHING TRIPS FROM MFRI tech_report 2018 (Table 2, page 4):
+## techreport-bycatch-of-birds-and-marine-mammals-lumpsucker-en-final-draft.pdf
+## in: C:\STEFFEN\OneDrive - THE ROYAL SOCIETY FOR THE PROTECTION OF BIRDS\STEFFEN\RSPB\Marine\Bycatch\GillnetBycatch\Analysis\LoomingEye
+triplandings<-data.frame(year=seq(2014,2017),landings=c(3000,3769,3309,3632)) %>%
+  mutate(tot_mammals=landings*mean(trip_data$mammals)) %>%
+  mutate(tot_birds=landings*mean(trip_data$birds)) %>%
+  mutate(tot_fish=(landings*mean(trip_data$fish)*0.003))  %>% ## convert fish landings into tons 
+  left_join(landings, by="year") %>%
+  left_join(BYCATCH_TOTAL_BASELINE, by="year") %>%
+  mutate(fish_mismatch=tot_fish/tons, mammal_mismatch=tot_mammals/mammals, bird_mismatch=tot_birds/birds)
+
+mean(triplandings$mammal_mismatch)         
+mean(triplandings$fish_mismatch)         
+summary(triplandings)         
+         
+         
+fwrite(triplandings,"Iceland_comparison_bycatch_trip_extrapolation.csv")        
+         
+         
+         
+
+#####**************************************************************************************########
+#####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
+#####
+#####    PRELIMINARY PLOTS AND ANALYSIS NOT USED IN MANUSCRIPT                    ~~~~~~~~########
+#####
+#####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
+#####**************************************************************************************########
 
 
 
@@ -544,7 +1102,7 @@ partialPlot(x=RFnumobs, pred.data=as.data.frame(data[!is.na(data$jday),]),
             x.var=jday, which.class="1", xlab="day of the year",xlim=c(80,140),xaxt="n",
             ylab="", lwd=3, col="firebrick", main="")
 axis(side=1,at=seq(80,140,10),
-labels=format(seq(from=ymd("2022-03-21"), to=ymd("2022-05-20"),by="10 days"),format("%d-%b")))
+     labels=format(seq(from=ymd("2022-03-21"), to=ymd("2022-05-20"),by="10 days"),format("%d-%b")))
 
 mtext("Partial contribution to predict bycatch",side=2,outer=T,cex=1.7,line=1)
 
@@ -559,14 +1117,14 @@ mtext("Partial contribution to predict bycatch",side=2,outer=T,cex=1.7,line=1)
 #####  PREDICT CONDITIONS WITH NO BYCATCH ###########
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
 RFpredict<- randomForest(as.factor(bycatch_bin)~EXP+soaking_nights+trossa_area+depth+dist_coast+jday,
-                        data=data, mtry=5,ntree=1500, importance=F,na.action=na.omit)
+                         data=data, mtry=5,ntree=1500, importance=F,na.action=na.omit)
 RFpredict
 newdat<-expand.grid(EXP=unique(data$EXP),
-            soaking_nights=c(1,2,4),
-            trossa_area=mean(data$trossa_area),
-            depth=seq(0,100,10),
-            dist_coast=c(50,5000,10000,15000),
-            jday=c(90,110,130))
+                    soaking_nights=c(1,2,4),
+                    trossa_area=mean(data$trossa_area),
+                    depth=seq(0,100,10),
+                    dist_coast=c(50,5000,10000,15000),
+                    jday=c(90,110,130))
 
 newdat$BYCATCH<-predict(RFpredict,newdat,type="prob")[,2]
 
@@ -580,7 +1138,7 @@ newdat %>% #filter(BYCATCH>0.9) %>%
   
   #ggplot(aes(x=variable, y=size)) + 
   #geom_violin()
-
+  
   ggplot(aes(x=depth,y=BYCATCH,colour=Season,size=soaking_nights)) +
   geom_point(position=position_dodge(width=1)) +
   facet_wrap(~dist_coast, ncol=2) +
@@ -611,14 +1169,14 @@ data$jday<-yday(data$start)  ### to account for changing fishing behaviour over 
 
 ### INCLUDING ALL DATA
 RFnum_fish<- randomForest(lumpfish_per_trossa~EXP+soaking_nights+trossa_area+fishing_trip_id+observer+depth+dist_coast+jday,
-                     data=data, mtry=5,ntree=1500, importance=T,na.action=na.omit)
+                          data=data, mtry=5,ntree=1500, importance=T,na.action=na.omit)
 RFnum_fish
 varImpPlot(RFnum_fish)
 
 
 ### ONLY INCLUDING DATA WITH INDEPENDENT OBSERVER ON BOARD
 RFnumobs_fish<- randomForest(lumpfish_per_trossa~EXP+soaking_nights+trossa_area+fishing_trip_id+depth+dist_coast+jday,
-                        data=data[data$observer==1,], mtry=5,ntree=1500, importance=T,na.action=na.omit)
+                             data=data[data$observer==1,], mtry=5,ntree=1500, importance=T,na.action=na.omit)
 RFnumobs_fish
 varImpPlot(RFnumobs_fish)
 
@@ -704,85 +1262,21 @@ mtext("Partial contribution to predict fish catch",side=2,outer=T,cex=1.7,line=1
 
 
 
-
-#####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
-#####
-#####    QUANTIFY DEPTH AT WHICH SPECIES ARE CAUGHT ###   ~~~~~~~~~~~~~~~~~~~~~~~~~~########
-#####
-#####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
-names(sets)
-depthcaptures<-sets[,c(17,18,21:35)] %>% 
-  mutate(depth=((min_depth_fathoms+max_depth_fathoms)/2)*1.8288) %>% ## convert depth to metres
-  mutate(depth=ifelse(is.na(depth),7*1.8288,depth)) %>% ## fill in one missing value
-  dplyr::select(-min_depth_fathoms,-max_depth_fathoms) %>%
-  gather(key="Species", value="Catch",-depth) %>%
-  mutate(Catch=ifelse(is.na(Catch),0,Catch)) %>%
-  filter(Catch>0)
-
-alldepthcaptures <- data.frame()
-for(x in 1:dim(depthcaptures)[1]){
-  l<-depthcaptures[x,]
-  out_l<-data.frame(Species=l$Species,depth=l$depth,Catch=rep(1,l$Catch))
-  alldepthcaptures <- bind_rows(alldepthcaptures, out_l)
-}
-dim(depthcaptures)
-dim(alldepthcaptures)
-
-depthmeans<-alldepthcaptures %>% group_by(Species) %>%
-  summarise(depth=mean(depth)) %>%
-  arrange(depth)
-
-alldepthcaptures %>%
-  left_join(totals, by="Species") %>%
-  filter(N>2) %>%
-  mutate(Species=as.factor(Species)) %>%
-  mutate(Species=factor(Species, levels=depthmeans$Species)) %>%
-  
-  ggplot(aes(y=depth, x=Species)) +
-  geom_boxplot() +
-  coord_flip() +
-  ylab("Mean catch depth (m)") +
-  geom_text(aes(x=Species, y=0, label = paste0("(n = ", N, ")")), nudge_y = -0.25) + 
-  theme(panel.background=element_rect(fill="white", colour="black"), 
-        axis.text=element_text(size=18, color="black"),
-        axis.title=element_text(size=20), 
-        strip.text.x=element_text(size=18, color="black"), 
-        strip.background=element_rect(fill="white", colour="black"), 
-        panel.grid.major = element_blank(), 
-        panel.grid.minor = element_blank(), 
-        panel.border = element_blank())
-
-#ggsave("LEB_Iceland_mean_catch_depth.jpg", width=10, height=8)
-
-
-
-
-
-
 #####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
 #####
 #####    QUANTIFY CATCH AND BYCATCH RATES PER DEPTH CATEGORY TO INFORM MANAGEMENT  ~~~~~~~~########
 #####
 #####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
 
-## FIRST COMPILE THE DATA WITH THE DEPTH INFO FOR EACH TROSSA
-
-head(data)
-names(sets)
-depthdata<-data %>% left_join(sets[,c(2,8,17,18)], by=c("fishing_trip_id","trossa_id")) %>% 
-  mutate(depth=((min_depth_fathoms+max_depth_fathoms)/2)*1.8288) %>% ## convert depth to metres
-  mutate(depth=ifelse(is.na(depth),7*1.8288,depth)) %>% ## fill in one missing value
-  dplyr::select(-min_depth_fathoms,-max_depth_fathoms) %>%
-  mutate(Month=month(start))
 
 
 ## SUMMARISE CAPTURE NUMBERS for waters more/less than 40 m depth
 
 meanCPUE<-depthdata  %>%
-  dplyr::select(fishing_trip_id, depth, CPUE, BPUE) %>%
+  dplyr::select(fishing_trip_id, depth, CPUE, BPUE, MPUE) %>%
   gather(key="type",value="catch",-fishing_trip_id,-depth) %>%
-  mutate(type=ifelse(type=="CPUE","fish","birds")) %>%
-  mutate(water=ifelse(depth>40,60,20)) %>%
+  mutate(type=ifelse(type=="CPUE","fish",ifelse(type=="MPUE","mammals","birds"))) %>%
+  mutate(water=ifelse(depth>50,70,20)) %>%
   group_by(type,water) %>%
   summarise(annotation=mean(catch), yaxis=max(catch)) %>%
   mutate(annotation=sprintf("%s %s per trossa",round(annotation*mean(data$effort),2),type))
@@ -791,22 +1285,22 @@ meanCPUE<-depthdata  %>%
 ## ACCOUNT FOR EFFORT AND NET SIZE IN CAPTURE NUMBERS
 
 depthdata  %>%
-  dplyr::select(fishing_trip_id, depth, CPUE, BPUE,jday,dist_coast, Month) %>%
+  dplyr::select(fishing_trip_id, depth, CPUE, BPUE,MPUE,jday,dist_coast, Month) %>%
   gather(key="type",value="catch",-fishing_trip_id,-depth,-Month,-jday,-dist_coast) %>%
-  mutate(type=ifelse(type=="CPUE","fish","birds")) %>%
-  mutate(water=ifelse(depth>40,60,20)) %>%
+  mutate(type=ifelse(type=="CPUE","fish",ifelse(type=="MPUE","mammals","birds"))) %>%
+  mutate(water=ifelse(depth>50,70,20)) %>%
   left_join(meanCPUE, by=c("water","type")) %>%
   select(-yaxis) %>%
   left_join((meanCPUE %>% group_by(type) %>% summarise(yaxis=max(yaxis))), by=c("type")) %>%
-#filter(type=="birds")
+  #filter(type=="birds")
   
   ggplot(aes(y=catch, x=depth, color=type)) +
   geom_point(size=0.5) +
   geom_smooth(method = "gam") +
-  geom_text(aes(x=water,y=yaxis,label=annotation),size=4) +
-  geom_vline(aes(xintercept=40), colour="grey45", linetype="dashed") +
-  facet_grid(type~Month, scales="free_y") +
-  #facet_wrap(~type, scales="free_y") +
+  geom_text(aes(x=water,y=yaxis,label=annotation),size=5) +
+  geom_vline(aes(xintercept=50), colour="grey45", linetype="dashed") +
+  #facet_grid(type~Month, scales="free_y") +
+  facet_wrap(~type, scales="free_y", ncol=1) +
   ylab("Mean catch per unit effort") +
   xlab("Water depth (m)") +
   theme(panel.background=element_rect(fill="white", colour="black"), 
@@ -819,7 +1313,10 @@ depthdata  %>%
         panel.grid.minor = element_blank(), 
         panel.border = element_blank())
 
-#ggsave("Iceland_catch_by_depth.jpg", width=10, height=8)
+# ggsave("Iceland_catch_by_depth.jpg", width=10, height=8)
+# ggsave("C:\\Users\\steffenoppel\\OneDrive - THE ROYAL SOCIETY FOR THE PROTECTION OF BIRDS\\STEFFEN\\MANUSCRIPTS\\in_prep\\Iceland_Lumpfish\\Fig_S2.jpg", width=14, height=8, dpi=1000)
+ggsave("C:\\STEFFEN\\OneDrive - THE ROYAL SOCIETY FOR THE PROTECTION OF BIRDS\\STEFFEN\\MANUSCRIPTS\\in_prep\\Iceland_Lumpfish\\Fig_S2.jpg", width=8, height=14, dpi=1000)
+
 
 
 
@@ -836,7 +1333,7 @@ depthdata  %>%
   dplyr::select(fishing_trip_id, depth, CPUE, BPUE,start,dist_coast) %>%
   gather(key="type",value="catch",-fishing_trip_id,-depth,-start,-dist_coast) %>%
   mutate(type=ifelse(type=="CPUE","fish","birds")) %>%
-
+  
   ggplot(aes(y=catch, x=start, color=type)) +
   geom_point(size=0.5) +
   geom_smooth(method = "gam") +
@@ -938,7 +1435,7 @@ porpdepthdata  %>%
   select(-yaxis) %>%
   left_join((porpmeanCPUE %>% group_by(type) %>% summarise(yaxis=max(yaxis))), by=c("type")) %>%
   mutate(psize=ifelse(type!="fish" & catch>0,1,0.5)) %>%
-
+  
   ggplot(aes(y=catch, x=depth, color=type, size=psize)) +
   geom_point() +
   geom_smooth(method = "gam") +
@@ -1036,160 +1533,5 @@ data  %>%
 #ggsave("Iceland_bycatch_by_soak_time.jpg", width=12, height=8)
 
 
-
-#####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
-#####
-#####    QUANTIFY CHANGE IN BYCATCH UNDER M<ANAGEMENT SCENARIOS  ~~~~~~~~########
-#####
-#####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
-
-## added on 24 Oct 2022
-# I think the data "distance from coast" are a bit challenging to work around, since most fishing occurs within fjords. A 5 km net ban from shore could literally mean a fishery closure. 
-# Thus depth-based restriction might be more manageable with the local conditions in my opinion
-# 
-# What would be the seabird bycatch % reduction if a 40 m set depth limit is implemented, compared to the currently observed bycatch levels?
-# And in the case of a 10m, 20m, or 30m limit?
-
-# We know that a total of 174 boats actively participated in the Icelandic lumpfish fishery the previous season (2021)
-# Annually, over 8,000 seabirds are bycaught in this fishery (Christensen-Dalsgaard et al. 2019).
-
-# In 2021, each boat had a 40 days long fishing season (max consecutive fishing days allowed, starting from first fishing day).
-# In 2022, the season was only 25 days.
-# 
-# Each boat is allowed to deploy a total of 7500 meters of nets and to leave them unattended for a maximum of 3 days under the current regulation (165/2020).
-# Gillnets are generally being deployed between 5-50 meters deep (MFRI 2022). 
-# 
-# In this report from 2014-2017, from which the 8,000 bycatch figure is extracted, we have calculated the depth and temporal distribution of fishing effort.
-# There is also a bycatch rate shown, but CPUE is per trip.
-
-
-## APPROACH:
-# estimate bycatch rate per depth category
-# estimate fish catch rate per depth category
-# use landings data per depth category to estimate proportion of national fishing effort per depth category
-# extrapolate current country-wide bycatch number (hoping it will be close to the ~8000)
-# simulate redistribution of fishing effort from <40 m to deeper depths and re-calculate bycatch and fish catch
-# this ignores potential availability of water at that depth with sufficient fish ressource
-
-
-## landings data
-depthlandings<-data.frame(depth=c(0,10,20,30,40,50),landings=c(0.13,0.34,0.18,0.13,0.1,0.12))
-seasonlandings<-data.frame(month=c(3,4,5,6,7,8),landings=c(0.07,0.45,0.30,0.12,0.05,0.01))
-landings<-data.frame(year=seq(2014,2021),tons=c(4074,6474,5504,4565,4516,5044,5315,7601))
-
-## catch and bycatch per depth category
-depthrates<-depthdata  %>% ungroup() %>%
-  mutate(depth=ifelse(depth<10,0,ifelse(depth<20,10,ifelse(depth<30,20,ifelse(depth<40,30,ifelse(depth<50,40,50)))))) %>%
-  dplyr::select(depth, CPUE, BPUE) %>%
-  gather(key="type",value="catch",-depth) %>%
-  mutate(type=ifelse(type=="CPUE","fish","birds")) %>% #filter(water==20 & type=="birds" & catch>0) %>% ggplot() + geom_histogram(aes(x=catch))
-  group_by(type,depth) %>%
-  summarise(mean=mean(catch),lcl=stats::quantile(catch,0.025),ucl=stats::quantile(catch,0.975))
-
-## apportion the tons of fish to depth categories in each year to calculate effort
-deptheffort<-bind_rows(landings,landings,landings,landings,landings,landings) %>%
-  mutate(depth=rep(depthlandings$depth,each=length(landings$year)), prop=rep(depthlandings$landings,each=length(landings$year))) %>%
-  mutate(depthcatch=prop*tons) %>%
-  arrange(year,depth) %>%
-  left_join(depthrates %>% filter(type=="fish"), by="depth") %>%
-  mutate(effort=(depthcatch/0.0055)/mean, effort.lcl=(depthcatch/0.0055)/lcl,effort.ucl=(depthcatch/0.0055)/ucl)   ## assuming that one fish weighs 5.5 kg or 0.0055 tons
-
-## extrapolate the estimated effort at depth categories to bycatch rates to estimate total bycatch per depth
-depthbycatch<-deptheffort %>%
-  select(year, tons,depth, depthcatch,effort,effort.lcl,effort.ucl) %>%
-  left_join(depthrates %>% filter(type=="birds"), by="depth") %>%
-  mutate(bycatch=mean*effort, bycatch.ucl=ucl*effort.ucl)   ## assuming that one fish weighs 5.5 kg or 0.0055 tons
-
-BYCATCH_TOTAL_BASELINE<-depthbycatch %>% group_by(year) %>%
-  summarise(fish=sum(depthcatch),birds=sum(bycatch),birds.ucl=sum(bycatch.ucl))
-
-fwrite(depthbycatch,"Iceland_total_bycatch_per_depth.csv")
-  
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
-#####  SIMULATE FISHING CLOSURE AT CERTAIN DEPTH AND REALLOCATION OF EFFORT TO DEEPER WATER ###########
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
-
-## assume fishing closed in waters <40m depth
-## all fishing effort would go into water >40 m depth
-
-closure_depth_simulation<-data.frame()
-
-for(d in c(10, 20, 30, 40, 50)) {
-  for (y in unique(BYCATCH_TOTAL_BASELINE$year)) {
-    yeff <- deptheffort %>% filter(year == y) %>%
-      mutate(IN = if_else(depth >= d, 1, 0))
-    
-    ### summarise effort in closed waters and redistribute to open waters
-    mean.eff.add <-
-      sum(yeff$effort[yeff$IN == 0]) / length(yeff$effort[yeff$IN == 1])
-    max.eff.add <-
-      sum(yeff$effort.ucl[yeff$IN == 0]) / length(yeff$effort[yeff$IN == 1])
-    
-    out <- yeff %>% filter(IN == 1) %>%
-      mutate(effort = effort + mean.eff.add,
-             effort.ucl = effort.ucl + max.eff.add) %>%
-      mutate(depthcatch = mean * effort * 0.0055) %>%    ### calculating fish catch when effort moved to deeper water
-      select(year, tons, depth, depthcatch, effort, effort.ucl) %>%
-      left_join(depthrates %>% filter(type == "birds"), by = "depth") %>%
-      mutate(bycatch = mean * effort,
-             bycatch.ucl = ucl * effort.ucl)  %>% group_by(year, tons) %>%
-      summarise(
-        landings = sum(depthcatch),
-        bycatch = sum(bycatch),
-        bycatch.ucl = sum(bycatch.ucl)
-      ) %>%
-      mutate(closure_depth = d)
-    
-    closure_depth_simulation <- bind_rows(closure_depth_simulation, out)
-  }
-}
-
-
-
-#### CALCULATING RELATIVE CHANGE IN FISH CATCH AND CHANGE IN BIRD BYCATCH
-
-closure_depth_simulation %>% left_join(BYCATCH_TOTAL_BASELINE, by="year") %>%
-  mutate(lumpfish=((landings-fish)/fish)*100,
-         seabirds=((bycatch-birds)/birds)*100,
-         bird_max_change=((bycatch.ucl-birds.ucl)/birds.ucl)*100) %>%
-  select(year,closure_depth,lumpfish,seabirds) %>%
-  gather(key="Species",value="change",-year,-closure_depth) %>%
-  mutate(Species=ifelse(Species=="seabirds","seabird bycatch","target lumpfish catch")) %>%
-  rename(Category=Species) %>%
-  filter(year==2021) %>%   ## all years have the same proportional change in reduction
-  
-  ggplot() +
-  geom_bar(aes(y = change, x = closure_depth, fill = Category), stat="identity",position="dodge")+
-  geom_hline(aes(yintercept=0), linetype="dashed", size=1)+
-  ylab("Change in total catch per year (in %)") +
-  xlab("Closure depth for fishing (m)") +
-  theme(panel.background=element_rect(fill="white", colour="black"), 
-        axis.text=element_text(size=16, color="black"), 
-        axis.title=element_text(size=18),
-        legend.text=element_text(size=16, color="black"),
-        legend.title=element_text(size=18, color="black"),
-        legend.position=c(0.15,0.1),
-        strip.background=element_rect(fill="white", colour="black"), 
-        panel.grid.major = element_blank(), 
-        panel.grid.minor = element_blank(), 
-        panel.border = element_blank())
-
-ggsave("Iceland_bycatch_reduction_depth_closure.jpg", width=12, height=8)
-
-
-
-#### CREATE SUMMARY TABLE OF ABSOLUTE REDUCTION PER YEAR
-SUMMARY<-closure_depth_simulation %>% left_join(BYCATCH_TOTAL_BASELINE, by="year") %>%
-  mutate(REDUCTION_birds=as.integer(bycatch-birds),
-         REDUCTION_birds_max=as.integer(bycatch.ucl-birds.ucl)) %>%
-  rename(extrapol_bycatch=birds,extrapol_bycatch_max=birds.ucl) %>%
-  rename(reduced_bycatch=bycatch,reduced_bycatch_max=bycatch.ucl) %>%
-  mutate(Baseline_bycatch=paste(as.integer(extrapol_bycatch),as.integer(extrapol_bycatch_max),sep=" - ")) %>%
-  mutate(Reduced_bycatch=paste(as.integer(reduced_bycatch),as.integer(reduced_bycatch_max),sep=" - ")) %>%
-  mutate(Reduction=paste(abs(REDUCTION_birds),abs(REDUCTION_birds_max),sep=" - ")) %>%
-  select(year,closure_depth,Baseline_bycatch,Reduced_bycatch,Reduction)
-
-fwrite(SUMMARY,"Iceland_simulated_absolute_bycatch_reduction.csv")
 
 
