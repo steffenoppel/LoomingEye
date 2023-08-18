@@ -137,6 +137,28 @@ sum(sets$CORM)
 sum(sets$CORM_PUE*sets$effort*sets$length*sets$height)
   
 
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#####  BASIC SUMMARY OF FISHING EFFORT AND BYCATCH BY DEPTH AND MESH ######
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+
+
+### quantify effort and bycatch with threshold of 30 m
+sets_orig %>% mutate(deep=if_else(depth_m>30,"deep","shallow")) %>%
+  group_by(deep) %>%
+  summarise(Eff=sum(effort *height * length), bycatch=sum(bycatch)) %>%
+  mutate(Ratio = round(Eff / sum(Eff), 2),Byc_ratio = round(bycatch / sum(bycatch), 2))
+
+### quantify effort and bycatch with threshold of 80 m mesh width
+sets_orig %>% mutate(small=if_else(mesh>80,"large","small")) %>%
+  group_by(small) %>%
+  summarise(Eff=sum(effort *height * length), bycatch=sum(bycatch)) %>%
+  mutate(Ratio = round(Eff / sum(Eff), 2),Byc_ratio = round(bycatch / sum(bycatch), 2))
+
+
+
+
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
 #####  CONDUCT SIMPLE BOOTSTRAP ANALYSIS LUMPING ALL DATA ######
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
@@ -297,7 +319,8 @@ DIFF %>% filter(Response!="CPUE") %>%
 # ggsave("Cornwall_bycatch_trial_effects.jpg", width=11, height=8)
 # fwrite(DIFF,"Cornwall_bycatch_differences.csv")
 
-
+sets %>% filter(Mitigation=="LEB") %>%
+  filter(GUIL>0)
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
 #####  CONDUCT ANALYSIS WITH DEPTH AND MESH SIZE ######
@@ -712,7 +735,7 @@ sets$year<-year(sets$Depl_Date)  ### to account for changing fishing behaviour b
 sets$bycatch_bin<-ifelse(sets$bycatch==0,"no","yes")  ### to distinguish between any and no bycatch
 
 ### BINARY BYCATCH YES/NO IS POORLY EXPLAINED BY EXPLANATORY VARIABLES
-RFbinary<- randomForest(as.factor(bycatch_bin)~Mitigation+effort+length+height+jday+year+mesh+depth_m+fisher,
+RFbinary<- randomForest(as.factor(bycatch_bin)~Mitigation+effort+length+height+jday+year+mesh+depth_m+fisher+NightSet,
                         data=sets, mtry=5,ntree=1500, importance=T,na.action=na.omit)
 RFbinary
 varImpPlot(RFbinary)
@@ -720,7 +743,7 @@ varImpPlot(RFbinary)
 
 
 ### BIRD BYCATCH NUMERIC IS POORLY EXPLAINED BY EXPLANATORY VARIABLES
-RFnum<- randomForest(bycatch~Mitigation+effort+length+height+jday+year+mesh+depth_m+fisher,
+RFnum<- randomForest(bycatch~Mitigation+effort+length+height+jday+year+mesh+depth_m+fisher+NightSet,
                      data=sets, mtry=5,ntree=1500, importance=T,na.action=na.omit)
 RFnum
 varImpPlot(RFnum)
@@ -744,7 +767,7 @@ IMP<-bind_rows(VARbinary[,1],VARnum[,1]) %>%
   mutate(IMP=(MSE/MAX)*100) %>%
   arrange(model,desc(IMP))
 
-mylevels<-IMP$variable[9:1]
+mylevels<-IMP$variable[10:1]
 IMP %>%  dplyr::mutate(variable=forcats::fct_relevel(variable,mylevels)) %>%
 ggplot(aes(x=variable, y=IMP)) +
   geom_bar(stat='identity', fill='lightblue') +
