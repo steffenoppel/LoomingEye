@@ -17,6 +17,8 @@
 # - added two missing depths by Trevally to match depths of control nets on same trip
 
 
+
+
 ## DISCUSSION WITH YANN on 7 July 2023
 ## decided on using 'decision tree' to limit bycatch
 ## fishing permitted in water <40 m only with either small (<80 mm) mesh width or at night
@@ -24,8 +26,12 @@
 ## assume that fishing effort would move either to deeper water or to night
 ## cannot assume that people would change mesh width as it would target a different fish species
 
-## NEED TO DO: look up port coordinates
-### sense check estimates - WHY are extrapolations orders of magnitude too high??
+## 30 August 2023
+### re-ran analysis with only data from two fishermen (PeterJohn and Scorpio)
+### did not result in significant effect, so commented out
+
+## 1 September 2023
+### after reading report included a different calculation of effect size with direct trip-specific difference
 
 
 ### Load libraries
@@ -36,6 +42,8 @@ library(stringr)
 library(lubridate)
 library(readxl)
 library(suncalc)
+#install.packages("measurements") 
+library(measurements)
 filter<-dplyr::filter
 select<-dplyr::select
 
@@ -78,12 +86,32 @@ sets_orig<-sets %>% rename(bycatch=`Total Bird Bycatch`,
   #mutate(start=ymd_hms(paste(Depl_Date,Depl_Time)), end=ymd_hms(paste(Haul_Date,Haul_Time)))
   mutate(effort=as.numeric(difftime(Haul_Date,Depl_Date,'hours')))
 
+
+#### TRY AND GET COORDINATES SORTED OUT
+# https://stackoverflow.com/questions/69484220/convert-dms-coordinates-to-decimal-degrees-in-r
+
+## first put lat and long in separate columns
+sets_orig<-sets_orig %>% ##filter(Set_ID %in% fuck$Set_ID) %>%
+  mutate(GPSStartnet=str_replace(GPSStartnet,pattern="N\r\n", replacement="N ")) %>%
+  mutate(GPSStartnet=str_replace(GPSStartnet,pattern="N \r\n", replacement="N ")) %>%
+  mutate(GPSStartnet=str_replace(GPSStartnet,pattern="\r\n", replacement="N ")) %>%
+  mutate(GPSStartnet=str_replace(GPSStartnet,pattern="’", replacement="")) %>%
+  separate(GPSStartnet, c("startlat","startlong"),"N ", remove=F) %>%
+  mutate(startlat=conv_unit(startlat, from = "deg_dec_min", to = "dec_deg") %>% as.numeric())  %>%
+  mutate(startlong=conv_unit(startlong, from = "deg_dec_min", to = "dec_deg") %>% as.numeric())  ##%>%
+  ##select(Set_ID, startlat, startlong, GPSStartnet) %>%
+  ##filter(is.na(startlong))
+  
+
+
+
 sets<-sets_orig %>% select (Trip_ID,Port,Set_ID,Depl_Date, Haul_Date,Mitigation,effort, bycatch, length, height,mesh,depth,depth_m,fish_catch,CORM,GUIL,GANN,fisher) %>%
   mutate(BPUE=(bycatch/(effort*length*height))) %>%  ### scale number of cormorants over 5 days
   mutate(CPUE=(fish_catch/(effort*length*height))) %>%  ### scale number of cormorants over 5 days
   mutate(CORM_PUE=(CORM/(effort*length*height))) %>%  ### scale number of cormorants over 5 days
   mutate(GUIL_PUE=(GUIL/(effort*length*height))) %>%  ### scale number of cormorants over 5 days
   mutate(GANN_PUE=(GANN/(effort*length*height))) %>%  ### scale number of cormorants over 5 days
+  #filter(fisher %in% c("PeterJohn","Scorpio")) %>%    ## optional subset of honest fishermen
   mutate(Month=month(Depl_Date)) %>%
   mutate_if(is.character,as.factor) %>%
   mutate(bycatch_bin=ifelse(bycatch>0,1,0))
@@ -247,66 +275,160 @@ OUT %>% filter(Response=="CORM_PUE") %>%
 
 
 #### CALCULATE DIFFERENCES
+## DISCARDED THIS SECTION ON 1 SEPT AS IT DID NOT CONTROL FOR PAIRED DESIGN
+# 
+# 
+# ####### LOOP OVER 5 RESPONSES OF INTEREST TO PRODUCE BOOTSTRAP TESTS FOR EACH
+# 
+# DIFF<-expand.grid(Mitigation=unique(sets$Mitigation),
+#                  Response=c("BPUE","CPUE","CORM_PUE","GUIL_PUE","GANN_PUE")) %>%
+#   mutate(mean=0,lcl=0,ucl=0,rel.mean=0,rel.lcl=0,rel.ucl=0) %>%
+#   filter(Mitigation!="Control")
+# 
+# for (i in 1:dim(DIFF)[1]){
+#   
+#   samples<- data %>%
+#     filter(Mitigation==DIFF$Mitigation[i]) %>%
+#     filter(Response==DIFF$Response[i]) %>%
+#     filter(!is.na(value))
+#   control.samples<- data %>%
+#     filter(Mitigation=="Control") %>%
+#     filter(Response==DIFF$Response[i]) %>%
+#     filter(!is.na(value))
+#   
+#   if(dim(samples)[1]>2){
+#     boot.samples <- matrix(sample(samples$value, size = 10000 * nrow(samples), replace = TRUE),10000, nrow(samples))
+#     boot.statistics <- apply(boot.samples, 1, mean, na.rm=F)
+#     control.boot.samples <- matrix(sample(control.samples$value, size = 10000 * nrow(control.samples), replace = TRUE),10000, nrow(control.samples))
+#     control.boot.statistics <- apply(control.boot.samples, 1, mean, na.rm=F)
+#     DIFF$mean[i]=mean(boot.statistics-control.boot.statistics)
+#     DIFF$lcl[i]=quantile((boot.statistics-control.boot.statistics),0.025)
+#     DIFF$ucl[i]=quantile((boot.statistics-control.boot.statistics),0.975)
+#     DIFF$rel.mean[i]=quantile(((boot.statistics-control.boot.statistics)/max(control.boot.statistics,0.0000000000000000000000001)),0.5)
+#     DIFF$rel.lcl[i]=quantile(((boot.statistics-control.boot.statistics)/max(control.boot.statistics,0.0000000000000000000000001)),0.025)
+#     DIFF$rel.ucl[i]=quantile(((boot.statistics-control.boot.statistics)/max(control.boot.statistics,0.0000000000000000000000001)),0.975)
+#   }
+# }
+# 
+# 
+# 
+# #### SUMMARISE OUTPUT ON CREDIBLE SCALE
+# 
+# DIFF<-DIFF %>% mutate(mean=mean*mean(sets$length,na.rm=T)*mean(sets$height,na.rm=T)*24,
+#                     lcl=lcl*mean(sets$length,na.rm=T)*mean(sets$height,na.rm=T)*24,
+#                     ucl=ucl*mean(sets$length,na.rm=T)*mean(sets$height,na.rm=T)*24
+# )
+# 
+# 
+# ### PLOT BOOTSTRAPPED OUTPUT ###
+# 
+# DIFF %>% filter(Response!="CPUE") %>%
+#   mutate(Response=ifelse(Response=="BPUE","All birds",
+#                          ifelse(Response=="CORM_PUE","Cormorants and shags",
+#                                 ifelse(Response=="GUIL_PUE","Guillemots","Gannets")))) %>%
+#   
+#   
+#   ggplot(aes(y=rel.mean, x=Mitigation, ymin=rel.lcl, ymax=rel.ucl)) +
+#   geom_point(size=3,col="firebrick")+
+#   geom_errorbar(width=.05, col="firebrick")+
+#   geom_hline(yintercept=0, col="forestgreen", linewidth=2,linetype="dashed")+
+#   facet_wrap(~Response,ncol=2) + 
+#   scale_y_continuous(limits=c(-1,1), breaks=seq(-1,1,0.2)) +
+#   xlab("") +
+#   ylab("Relative difference in bycatch to control sets") +
+#   theme(panel.background=element_rect(fill="white", colour="black"), 
+#         axis.text=element_text(size=16, color="black"), 
+#         axis.title=element_text(size=18), 
+#         strip.text=element_text(size=18, color="black"),
+#         strip.background=element_rect(fill="white", colour="black"), 
+#         panel.grid.major = element_blank(), 
+#         panel.grid.minor = element_blank(), 
+#         panel.border = element_blank())
+# 
+# # ggsave("Cornwall_bycatch_trial_effects.jpg", width=11, height=8)
+# # fwrite(DIFF,"Cornwall_bycatch_differences.csv")
+# 
+# sets %>% filter(Mitigation=="LEB") %>%
+#   filter(GUIL>0)
 
 
-####### LOOP OVER 5 RESPONSES OF INTEREST TO PRODUCE BOOTSTRAP TESTS FOR EACH
 
-DIFF<-expand.grid(Mitigation=unique(sets$Mitigation),
-                 Response=c("BPUE","CPUE","CORM_PUE","GUIL_PUE","GANN_PUE")) %>%
-  mutate(mean=0,lcl=0,ucl=0,rel.mean=0,rel.lcl=0,rel.ucl=0) %>%
-  filter(Mitigation!="Control")
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#####  CONDUCT SIMPLE BOOTSTRAP OF TRIP-WISE DIFFERENCES LUMPING ALL DATA ######
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+# NEED TO FIGURE OUT HOW TO DEAL WITH TRIPS WITH MULTIPLE SETS OF CONTROLS
+
+####### LOOP OVER 3 RESPONSES OF INTEREST TO PRODUCE BOOTSTRAP TESTS FOR EACH
+
+DIFF<-expand.grid(Mitigation=unique(sets$Mitigation)[2:3],
+                 Response=c("BPUE","CORM_PUE","GUIL_PUE")) %>%
+  mutate(mean=0,lcl=0,ucl=0)
+
+
+data<-sets %>% 
+  dplyr::select(BPUE,CORM_PUE,GUIL_PUE,Trip_ID,Set_ID,Mitigation) %>%
+  gather(key="Response", value="value", -Trip_ID,-Set_ID,-Mitigation)
+
 
 for (i in 1:dim(DIFF)[1]){
   
   samples<- data %>%
+    filter(Response==DIFF$Response[i]) %>%
     filter(Mitigation==DIFF$Mitigation[i]) %>%
+    mutate(TrialID=paste(Trip_ID,substr(Set_ID,nchar(as.character(Set_ID)),nchar(as.character(Set_ID))),sep="_")) %>%
+    rename(Treatment=value)
+  controlsamples<- data %>%
     filter(Response==DIFF$Response[i]) %>%
-    filter(!is.na(value))
-  control.samples<- data %>%
     filter(Mitigation=="Control") %>%
-    filter(Response==DIFF$Response[i]) %>%
-    filter(!is.na(value))
+    filter(Trip_ID %in% samples$Trip_ID) %>%
+    mutate(TrialID=paste(Trip_ID,substr(Set_ID,nchar(as.character(Set_ID)),nchar(as.character(Set_ID))),sep="_")) %>%
+    rename(Control=value)
   
-  if(dim(samples)[1]>2){
-    boot.samples <- matrix(sample(samples$value, size = 10000 * nrow(samples), replace = TRUE),10000, nrow(samples))
-    boot.statistics <- apply(boot.samples, 1, mean, na.rm=F)
-    control.boot.samples <- matrix(sample(control.samples$value, size = 10000 * nrow(control.samples), replace = TRUE),10000, nrow(control.samples))
-    control.boot.statistics <- apply(control.boot.samples, 1, mean, na.rm=F)
-    DIFF$mean[i]=mean(boot.statistics-control.boot.statistics)
-    DIFF$lcl[i]=quantile((boot.statistics-control.boot.statistics),0.025)
-    DIFF$ucl[i]=quantile((boot.statistics-control.boot.statistics),0.975)
-    DIFF$rel.mean[i]=quantile(((boot.statistics-control.boot.statistics)/max(control.boot.statistics,0.0000000000000000000000001)),0.5)
-    DIFF$rel.lcl[i]=quantile(((boot.statistics-control.boot.statistics)/max(control.boot.statistics,0.0000000000000000000000001)),0.025)
-    DIFF$rel.ucl[i]=quantile(((boot.statistics-control.boot.statistics)/max(control.boot.statistics,0.0000000000000000000000001)),0.975)
+  for (l in 1:dim(samples)[1]) {
+    control<-controlsamples %>% filter(Trip_ID==samples$Trip_ID[l])
+    if(dim(control)[1]>1){
+      if(samples$TrialID[l] %in% control$TrialID){
+        control<-controlsamples %>% filter(TrialID==samples$TrialID[l])
+      }else{
+        control<-control[sample(dim(control)[1],1),]
+      }
+    }
+    samples$Control[l]<-control$Control
   }
+  
+ ### CALCULATE DIFFERENCE ###
+  samples<-samples %>% mutate(Diff=Treatment-Control) %>% select(Trip_ID,Mitigation,Response,Diff)
+  
+  ### CALCULATE BOOTSTRAPPED CONFIDENCE INTERVALS
+    boot.samples <- matrix(sample(samples$Diff, size = 10000 * nrow(samples), replace = TRUE),10000, nrow(samples))
+    boot.statistics <- apply(boot.samples, 1, mean, na.rm=F)
+    DIFF$mean[i]=median(boot.statistics)
+    DIFF$lcl[i]=quantile(boot.statistics,0.025)
+    DIFF$ucl[i]=quantile(boot.statistics,0.975)
+
 }
-
-
 
 #### SUMMARISE OUTPUT ON CREDIBLE SCALE
 
 DIFF<-DIFF %>% mutate(mean=mean*mean(sets$length,na.rm=T)*mean(sets$height,na.rm=T)*24,
-                    lcl=lcl*mean(sets$length,na.rm=T)*mean(sets$height,na.rm=T)*24,
-                    ucl=ucl*mean(sets$length,na.rm=T)*mean(sets$height,na.rm=T)*24
-)
+                      lcl=lcl*mean(sets$length,na.rm=T)*mean(sets$height,na.rm=T)*24,
+                      ucl=ucl*mean(sets$length,na.rm=T)*mean(sets$height,na.rm=T)*24)
 
 
 ### PLOT BOOTSTRAPPED OUTPUT ###
 
-DIFF %>% filter(Response!="CPUE") %>%
+DIFF %>% 
   mutate(Response=ifelse(Response=="BPUE","All birds",
-                         ifelse(Response=="CORM_PUE","Cormorants and shags",
-                                ifelse(Response=="GUIL_PUE","Guillemots","Gannets")))) %>%
+                         ifelse(Response=="CORM_PUE","Cormorants and shags","Guillemots"))) %>%
   
-  
-  ggplot(aes(y=rel.mean, x=Mitigation, ymin=rel.lcl, ymax=rel.ucl)) +
+  ggplot(aes(y=mean, x=Mitigation, ymin=lcl, ymax=ucl)) +
   geom_point(size=3,col="firebrick")+
   geom_errorbar(width=.05, col="firebrick")+
   geom_hline(yintercept=0, col="forestgreen", linewidth=2,linetype="dashed")+
-  facet_wrap(~Response,ncol=2) + 
-  scale_y_continuous(limits=c(-1,1), breaks=seq(-1,1,0.2)) +
+  facet_wrap(~Response,ncol=3) + 
+  scale_y_continuous(limits=c(-1,1), breaks=seq(-0.8,0.8,0.2)) +
   xlab("") +
-  ylab("Relative difference in bycatch to control sets") +
+  ylab("Difference in bycatch to control sets") +
   theme(panel.background=element_rect(fill="white", colour="black"), 
         axis.text=element_text(size=16, color="black"), 
         axis.title=element_text(size=18), 
@@ -319,8 +441,12 @@ DIFF %>% filter(Response!="CPUE") %>%
 # ggsave("Cornwall_bycatch_trial_effects.jpg", width=11, height=8)
 # fwrite(DIFF,"Cornwall_bycatch_differences.csv")
 
-sets %>% filter(Mitigation=="LEB") %>%
-  filter(GUIL>0)
+
+
+
+
+
+
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
 #####  CONDUCT ANALYSIS WITH DEPTH AND MESH SIZE ######
@@ -1270,7 +1396,7 @@ fwrite(SUMMARY,"Cornwall_simulated_bycatch_multi_option.csv")
 
 
 ggplot(SUMMARY,aes(y = rel.mean, x = Response, ymin=rel.lcl, ymax=rel.ucl)) +
-  geom_bar(stat="identity")+
+  geom_bar(stat="identity", fill="firebrick")+
   geom_hline(aes(yintercept=0), linetype="dashed", size=1)+
   geom_errorbar(width=0.5)+
   ylab("Change in total catch (in %)") +
@@ -1298,3 +1424,109 @@ group.bycatch.rates<-OUT  %>% mutate(mean=mean*mean(sets$length,na.rm=T)*mean(se
                                      ucl=ucl*mean(sets$length,na.rm=T)*mean(sets$height,na.rm=T)*24)
 
 fwrite(group.bycatch.rates,"Cornwall_group_bycatch_rates.csv")
+
+
+
+
+
+
+#####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
+#####
+#####    PLOT MAP OF FISHING LOCATIONS   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
+#####
+#####~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~########
+### WORKS ONLY IF rnaturalearthhires is installed: https://github.com/ropensci/rnaturalearthhires/issues/2
+## devtools::install_github("ropensci/rnaturalearthhires") 
+library(pdp)
+library(ggthemes)
+library(ggsn)
+library(marmap)
+library(rnaturalearth)
+library(sf)
+land <- ne_countries(scale = 10, country = "United Kingdom", returnclass = "sf")
+study_area <- sets_orig %>% summarise(lat=median(startlat)-0.2,lon=median(startlong)+0.1)
+basemap<-ggplotGrob(ggplot() +   geom_sf(data=land, color = "black", lwd=0.5, fill="khaki") +
+                      geom_point(data = study_area, aes(x = lon, y = lat),
+                                 color = "indianred", size = 3, shape=15) +
+                      theme(panel.background=element_rect(fill="slategray1", colour="slategray1"),
+                            panel.border = element_rect(fill=NA, colour="black"),
+                            panel.grid.major = element_blank(),
+                            panel.grid.minor = element_blank(),
+                            axis.text=element_blank(),
+                            axis.title=element_blank(),
+                            strip.text=element_blank(),
+                            strip.background=element_rect(fill="white", colour="black")))  
+
+# convert data to sf object
+plotdat <- sets_orig %>%
+  select(Set_ID, startlat, startlong, Mitigation, bycatch) %>%
+  mutate(Bycatch=ifelse(bycatch>0,"Yes","None")) %>%
+  filter(!is.na(startlong)) %>%
+  filter(startlong<10) %>%   ### weed out nonsense locations
+  mutate(startlong=startlong*-1) %>%
+  filter(!is.na(startlat)) ##%>%
+  # st_as_sf(coords = c('startlong','startlat')) %>%
+  # st_set_crs(4326)
+
+fuck<-sets_orig %>% #filter(startlong>10) %>%
+  filter(startlat<45) %>%
+  select(Set_ID, startlat, startlong, Mitigation, bycatch)
+# get bathymetry data
+b = getNOAA.bathy(lon1 = min(plotdat$startlong, na.rm=T)-0.3, lon2 = max(plotdat$startlong, na.rm=T)+0.3, lat1 = min(plotdat$startlat, na.rm=T)-0.3, lat2 = max(plotdat$startlat, na.rm=T)+0.3, 
+                  resolution = 1)
+
+# convert bathymetry to data frame
+bf = fortify.bathy(b)
+
+
+## create a plot of the island with location of sample nets
+
+ggplot() +
+  geom_sf(data=land, color = "black", lwd=0.5, fill="khaki") +  ###  "khaki"
+  coord_sf(ylim = c(min(plotdat$startlat, na.rm=T),max(plotdat$startlat, na.rm=T)),  xlim = c(min(plotdat$startlong, na.rm=T)-0.3,max(plotdat$startlong, na.rm=T)+0.3))+
+  
+  ## add death locations
+  geom_point(data=plotdat, aes(x=startlong, y=startlat, colour=Mitigation, shape=Bycatch), size=2)+
+  
+  # add 50m contour
+  geom_contour(data = bf, 
+               aes(x=x, y=y, z=z),
+               breaks=c(-40),
+               size=c(0.6),
+               colour="grey10")+
+  
+  
+  ## legends and labels  
+  #guides(size=guide_legend(title="Effort (trossa area * nights)")) +
+  guides(colour=guide_legend(title="Mitigation type", nrow=3))+
+  scale_shape_manual(values=c(16,8))+
+  #scale_size_manual(values=c(0,16))+
+  guides(shape=guide_legend(title="Bycatch", nrow=1))+
+  #guides(size="none")+
+  
+  ## insert scalebar
+  ggsn::scalebar(data=land,location = "bottomleft", dist = 20, dist_unit="km",
+             model = 'WGS84', transform=T) +
+  
+  ## beautification of the axes
+  theme(panel.background=element_rect(fill="slategray1", colour="slategray1"),
+        panel.border = element_rect(fill=NA, colour="black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text=element_text(size=18, color="black"), 
+        axis.title=element_text(size=18), 
+        strip.text.x=element_text(size=18, color="black"), 
+        strip.background=element_rect(fill="white", colour="black"),
+        legend.text=element_text(size=14),
+        legend.title = element_text(size=16),
+        legend.key.size = unit(3,"point"),
+        legend.background = element_blank(), #element_rect(fill="forestgreen", colour="black"),
+        legend.key = element_blank(),
+        legend.position = c(0.15,0.85)) +
+  ylab("Longitude") +
+  xlab("Latitude")
+
+
+# ggsave("C:\\STEFFEN\\RSPB\\Marine\\Bycatch\\GillnetBycatch\\Analysis\\LoomingEye\\Map_fishing_locations.jpg", width=8, height=9, dpi=1000)
+# ggsave("C:\\Users\\steffenoppel\\OneDrive - THE ROYAL SOCIETY FOR THE PROTECTION OF BIRDS\\STEFFEN\\MANUSCRIPTS\\in_prep\\Iceland_Lumpfish\\Fig_1.jpg", width=8, height=9, dpi=1000)
+ggsave("C:\\Users\\sop\\Documents\\Steffen\\RSPB\\Bycatch\\Fig_1.jpg", width=10, height=8, dpi=1000)
